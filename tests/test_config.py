@@ -52,6 +52,28 @@ def test_tilde_data_path_is_expanded(tmp_path):
     assert config.clikan_data == Path("~/board.dat").expanduser()
 
 
+def test_explicit_config_path_overrides_clikan_home(monkeypatch, tmp_path):
+    default_home = tmp_path / "default-home"
+    explicit_path = tmp_path / "boards" / "work.yaml"
+    monkeypatch.setenv("CLIKAN_HOME", str(default_home))
+
+    assert get_config_path(explicit_path) == explicit_path.resolve()
+    assert get_config_path() == (default_home / ".clikan.yaml").resolve()
+
+
+def test_read_explicit_config_uses_its_directory_for_relative_data(tmp_path):
+    config_path = tmp_path / "boards" / "work.yaml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        yaml.safe_dump({"clikan_data": "./work.dat"}),
+        encoding="utf-8",
+    )
+
+    config = read_config(config_path)
+
+    assert config.clikan_data == (config_path.parent / "work.dat").resolve()
+
+
 def test_invalid_limit_is_rejected(tmp_path):
     with pytest.raises(click.ClickException, match="non-negative integer"):
         validate_config(
@@ -97,3 +119,13 @@ def test_create_default_config_creates_missing_home(monkeypatch, tmp_path):
 
     assert config_path == nested_home / ".clikan.yaml"
     assert config_path.exists()
+
+
+def test_create_default_config_at_explicit_path(tmp_path):
+    config_path = tmp_path / "boards" / "personal.yaml"
+
+    created_path = create_default_config(config_path)
+    raw = yaml.safe_load(created_path.read_text(encoding="utf-8"))
+
+    assert created_path == config_path.resolve()
+    assert raw["clikan_data"] == str(config_path.resolve().with_suffix(".dat"))
