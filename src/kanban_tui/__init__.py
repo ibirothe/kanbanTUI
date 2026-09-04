@@ -12,7 +12,7 @@ def get_version() -> str:
             pass
 
     try:
-        return package_version("clikan")
+        return package_version("kanbanTUI")
     except PackageNotFoundError:
         return "unknown"
 
