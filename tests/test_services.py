@@ -18,7 +18,7 @@ BEFORE = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
 
 def base_config(**limits):
     return AppConfig(
-        clikan_data=Path("/tmp/unused"),
+        data_path=Path("/tmp/unused"),
         limits=Limits(**limits),
         repaint=False,
     )
