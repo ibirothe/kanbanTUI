@@ -218,24 +218,29 @@ def promote(ids):
 
 
 @clikan.command()
-@click.argument('id', nargs=-1)
+@click.argument('ids', nargs=-1)
 def regress(ids):
     """Regress task"""
     config = read_config_yaml()
     dd = read_data(config)
 
     for id in ids:
-        item = dd['data'].get(int(id))
-        if item is None:
-            click.echo('No existing task with id: %s' % id)
-        elif item[0] == 'done':
-            click.echo('Regressing task %s to in-progress.' % id)
-            dd['data'][int(id)] = ['inprogress', item[1], timestamp(), item[3]]
-        elif item[0] == 'inprogress':
-            click.echo('Regressing task %s to todo.' % id)
-            dd['data'][int(id)] = ['todo', item[1], timestamp(), item[3]]
-        else:
-            click.echo('Already in todo, can not regress %s' % id)
+        try:
+            item = dd['data'].get(int(id))
+            if item is None:
+                click.echo('No existing task with id: %s' % id)
+            elif item[0] == 'done':
+                click.echo('Regressing task %s to in-progress.' % id)
+                dd['data'][int(id)] = [
+                    'inprogress', item[1], timestamp(), item[3]
+                ]
+            elif item[0] == 'inprogress':
+                click.echo('Regressing task %s to todo.' % id)
+                dd['data'][int(id)] = ['todo', item[1], timestamp(), item[3]]
+            else:
+                click.echo('Already in todo, can not regress %s' % id)
+        except ValueError:
+            click.echo('Invalid task id')
 
     write_data(config, dd)
     if ('repaint' in config and config['repaint']):
