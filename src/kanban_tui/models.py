@@ -9,7 +9,7 @@ LEGACY_TIMESTAMP_FORMAT = "%Y-%b-%d %H:%M:%S"
 
 
 def parse_timestamp(value: Any) -> datetime:
-    """Parse current ISO timestamps and the legacy clikan timestamp format."""
+    """Parse current ISO timestamps and the older timestamp format."""
     if isinstance(value, datetime):
         parsed = value
     elif isinstance(value, str):
@@ -146,7 +146,7 @@ class Limits:
 
 @dataclass
 class AppConfig:
-    clikan_data: Path
+    data_path: Path
     limits: Limits = field(default_factory=Limits)
     repaint: bool = False
 
