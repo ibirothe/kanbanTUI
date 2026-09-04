@@ -290,7 +290,7 @@ def test_show_plain_is_color_free(runner, write_config):
     result = runner.invoke(main, ["show", "--format", "plain"])
 
     assert result.exit_code == 0
-    assert result.output.startswith("id\tstate\ttext\tcreated_at\tmodified_at\n")
+    assert result.output.startswith("id\tstate\ttext\tcreated_at\tmodified_at\tpriority\ttags\n")
     assert "1\ttodo\tplain task\t" in result.output
     assert "\x1b[" not in result.output
 
