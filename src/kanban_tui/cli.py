@@ -4,7 +4,16 @@ import click
 from click_default_group import DefaultGroup
 
 from . import VERSION
-from .config import create_default_config, get_config_path, read_config
+from .config import (
+    create_default_config,
+    create_named_board,
+    get_board_config_path,
+    get_config_path,
+    list_named_boards,
+    read_config,
+    set_config_value,
+    validate_board_name,
+)
 from .models import TaskState
 from .rendering import SORT_CHOICES, render_board, render_history
 from .services import (
@@ -44,7 +53,17 @@ class PrefixGroup(DefaultGroup):
 def _selected_config_path() -> Path | None:
     root_context = click.get_current_context().find_root()
     config_path = root_context.params.get("config_path")
-    return config_path if isinstance(config_path, Path) else None
+    if isinstance(config_path, Path):
+        return config_path
+
+    board_name = root_context.params.get("board_name")
+    if isinstance(board_name, str):
+        return get_board_config_path(board_name)
+    return None
+
+
+def _effective_config_path() -> Path:
+    return get_config_path(_selected_config_path())
 
 
 def _read_config():
@@ -87,8 +106,19 @@ def _run_state_command(ids: tuple[str, ...], target_state: TaskState) -> None:
     default=None,
     help="Use an explicit YAML configuration file.",
 )
-def main(config_path):
+@click.option(
+    "--board",
+    "board_name",
+    default=None,
+    metavar="NAME",
+    help="Use a named board from $KANBAN_TUI_HOME/boards.",
+)
+def main(config_path, board_name):
     """kanbanTUI: terminal personal Kanban board."""
+    if config_path is not None and board_name is not None:
+        raise click.UsageError("--config and --board cannot be used together.")
+    if board_name is not None:
+        validate_board_name(board_name)
 
 
 @main.command()
@@ -103,6 +133,82 @@ def configure():
 
     created_path = create_default_config(explicit_path)
     click.echo(f"Creating {created_path}")
+
+
+@main.group(name="board")
+def board_commands():
+    """Create and inspect named boards."""
+
+
+@board_commands.command(name="create")
+@click.argument("name")
+def board_create(name):
+    """Create a named board."""
+    normalized = validate_board_name(name)
+    created_path = create_named_board(normalized)
+    click.echo(f"Created board '{normalized}' at {created_path}")
+
+
+@board_commands.command(name="list")
+def board_list():
+    """List the default and named boards."""
+    effective_path = _effective_config_path()
+    default_path = get_config_path()
+    entries: list[tuple[str, Path]] = []
+
+    if default_path.exists() or effective_path == default_path:
+        entries.append(("default", default_path))
+    entries.extend(
+        (name, get_board_config_path(name)) for name in list_named_boards()
+    )
+
+    if not entries:
+        click.echo("No boards configured. Create one with: kanban-tui board create NAME")
+        return
+
+    for name, path in entries:
+        marker = "*" if path == effective_path else " "
+        click.echo(f"{marker} {name}\t{path}")
+
+
+@main.group(name="config")
+def config_commands():
+    """Inspect and edit the selected configuration."""
+
+
+@config_commands.command(name="path")
+def config_path_command():
+    """Print the selected configuration path."""
+    click.echo(_effective_config_path())
+
+
+@config_commands.command(name="show")
+def config_show():
+    """Show normalized configuration values."""
+    path = _effective_config_path()
+    config = _read_config()
+    click.echo(f"path: {path}")
+    click.echo(f"data_path: {config.data_path}")
+    click.echo(
+        "limits.todo: "
+        + (str(config.limits.todo) if config.limits.todo is not None else "unlimited")
+    )
+    click.echo(
+        "limits.wip: "
+        + (str(config.limits.wip) if config.limits.wip is not None else "unlimited")
+    )
+    click.echo(f"limits.done: {config.limits.done}")
+    click.echo(f"limits.taskname: {config.limits.taskname}")
+    click.echo(f"repaint: {'true' if config.repaint else 'false'}")
+
+
+@config_commands.command(name="set")
+@click.argument("key")
+@click.argument("value")
+def config_set(key, value):
+    """Set one supported configuration value."""
+    path = set_config_value(key, value, _selected_config_path())
+    click.echo(f"Updated {key} in {path}")
 
 
 @main.command()
