@@ -2,35 +2,35 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from kanban_tui.cli import clikan
+from kanban_tui.cli import main
 
 
 def test_help_and_version(runner):
-    help_result = runner.invoke(clikan, ["--help"])
-    version_result = runner.invoke(clikan, ["--version"])
+    help_result = runner.invoke(main, ["--help"])
+    version_result = runner.invoke(main, ["--version"])
 
     assert help_result.exit_code == 0
-    assert "clikan: CLI personal kanban" in help_result.output
+    assert "kanbanTUI: terminal personal Kanban board." in help_result.output
     assert version_result.exit_code == 0
-    assert "clikan, version" in version_result.output
+    assert "kanban-tui, version" in version_result.output
 
 
-def test_configure_creates_default_config(runner, isolated_clikan_home):
-    result = runner.invoke(clikan, ["configure"])
+def test_configure_creates_default_config(runner, isolated_app_home):
+    result = runner.invoke(main, ["configure"])
 
     assert result.exit_code == 0
-    assert (isolated_clikan_home / ".clikan.yaml").exists()
+    assert (isolated_app_home / ".kanban-tui.yaml").exists()
     assert "Creating" in result.output
 
 
 def test_add_show_promote_regress_delete(runner, write_config):
     write_config()
 
-    add_result = runner.invoke(clikan, ["add", "task", "one"])
-    show_result = runner.invoke(clikan, ["show"])
-    promote_result = runner.invoke(clikan, ["promote", "1"])
-    regress_result = runner.invoke(clikan, ["regress", "1"])
-    delete_result = runner.invoke(clikan, ["delete", "1"])
+    add_result = runner.invoke(main, ["add", "task", "one"])
+    show_result = runner.invoke(main, ["show"])
+    promote_result = runner.invoke(main, ["promote", "1"])
+    regress_result = runner.invoke(main, ["regress", "1"])
+    delete_result = runner.invoke(main, ["delete", "1"])
 
     assert add_result.exit_code == 0
     assert "Creating new task w/ id: 1 -> task one" in add_result.output
@@ -44,8 +44,8 @@ def test_add_show_promote_regress_delete(runner, write_config):
 def test_add_unquoted_words_create_one_task(runner, write_config):
     write_config()
 
-    result = runner.invoke(clikan, ["add", "Fix", "login", "bug"])
-    show_result = runner.invoke(clikan, ["show"])
+    result = runner.invoke(main, ["add", "Fix", "login", "bug"])
+    show_result = runner.invoke(main, ["show"])
 
     assert result.exit_code == 0
     assert "Creating new task w/ id: 1 -> Fix login bug" in result.output
@@ -55,11 +55,11 @@ def test_add_unquoted_words_create_one_task(runner, write_config):
 
 def test_edit_updates_active_task_text(runner, write_config):
     write_config()
-    runner.invoke(clikan, ["add", "old", "text"])
-    runner.invoke(clikan, ["promote", "1"])
+    runner.invoke(main, ["add", "old", "text"])
+    runner.invoke(main, ["promote", "1"])
 
-    edit_result = runner.invoke(clikan, ["edit", "1", "new", "text"])
-    show_result = runner.invoke(clikan, ["show"])
+    edit_result = runner.invoke(main, ["edit", "1", "new", "text"])
+    show_result = runner.invoke(main, ["show"])
 
     assert edit_result.exit_code == 0
     assert "Updated task 1 -> new text" in edit_result.output
@@ -69,10 +69,10 @@ def test_edit_updates_active_task_text(runner, write_config):
 
 def test_edit_deleted_task_is_rejected(runner, write_config):
     write_config()
-    runner.invoke(clikan, ["add", "task"])
-    runner.invoke(clikan, ["delete", "1"])
+    runner.invoke(main, ["add", "task"])
+    runner.invoke(main, ["delete", "1"])
 
-    result = runner.invoke(clikan, ["edit", "1", "new"])
+    result = runner.invoke(main, ["edit", "1", "new"])
 
     assert result.exit_code == 1
     assert "Can not edit deleted task 1." in result.output
@@ -80,12 +80,12 @@ def test_edit_deleted_task_is_rejected(runner, write_config):
 
 def test_history_lists_deleted_tasks_and_restore_recovers_them(runner, write_config):
     write_config()
-    runner.invoke(clikan, ["add", "recover", "me"])
-    runner.invoke(clikan, ["delete", "1"])
+    runner.invoke(main, ["add", "recover", "me"])
+    runner.invoke(main, ["delete", "1"])
 
-    history_result = runner.invoke(clikan, ["history"])
-    restore_result = runner.invoke(clikan, ["restore", "1"])
-    show_result = runner.invoke(clikan, ["show"])
+    history_result = runner.invoke(main, ["history"])
+    restore_result = runner.invoke(main, ["restore", "1"])
+    show_result = runner.invoke(main, ["show"])
 
     assert history_result.exit_code == 0
     assert "recover me" in history_result.output
@@ -97,11 +97,11 @@ def test_history_lists_deleted_tasks_and_restore_recovers_them(runner, write_con
 
 def test_restore_respects_todo_limit(runner, write_config):
     write_config(limits={"todo": 1})
-    runner.invoke(clikan, ["add", "old"])
-    runner.invoke(clikan, ["delete", "1"])
-    runner.invoke(clikan, ["add", "active"])
+    runner.invoke(main, ["add", "old"])
+    runner.invoke(main, ["delete", "1"])
+    runner.invoke(main, ["add", "active"])
 
-    result = runner.invoke(clikan, ["restore", "1"])
+    result = runner.invoke(main, ["restore", "1"])
 
     assert result.exit_code == 1
     assert "Can not restore, todo limit of 1 reached." in result.output
@@ -110,18 +110,18 @@ def test_restore_respects_todo_limit(runner, write_config):
 def test_unique_command_prefixes_are_supported(runner, write_config):
     write_config()
 
-    assert runner.invoke(clikan, ["a", "task"]).exit_code == 0
-    assert "task" in runner.invoke(clikan, ["s"]).output
+    assert runner.invoke(main, ["a", "task"]).exit_code == 0
+    assert "task" in runner.invoke(main, ["s"]).output
     assert "Promoting task 1 to in-progress." in runner.invoke(
-        clikan, ["p", "1"]
+        main, ["p", "1"]
     ).output
-    assert "Removed task 1." in runner.invoke(clikan, ["d", "1"]).output
+    assert "Removed task 1." in runner.invoke(main, ["d", "1"]).output
 
 
 def test_taskname_limit_returns_failure(runner, write_config):
     write_config(limits={"taskname": 5})
 
-    result = runner.invoke(clikan, ["add", "too", "long"])
+    result = runner.invoke(main, ["add", "too", "long"])
 
     assert result.exit_code == 1
     assert "Brevity counts:" in result.output
@@ -130,7 +130,7 @@ def test_taskname_limit_returns_failure(runner, write_config):
 def test_empty_task_text_returns_failure(runner, write_config):
     write_config()
 
-    result = runner.invoke(clikan, ["add", "   "])
+    result = runner.invoke(main, ["add", "   "])
 
     assert result.exit_code == 1
     assert "Task text cannot be empty." in result.output
@@ -139,16 +139,16 @@ def test_empty_task_text_returns_failure(runner, write_config):
 def test_missing_operands_use_click_usage_errors(runner, write_config):
     write_config()
 
-    assert runner.invoke(clikan, ["add"]).exit_code == 2
-    assert runner.invoke(clikan, ["edit", "1"]).exit_code == 2
-    assert runner.invoke(clikan, ["promote"]).exit_code == 2
-    assert runner.invoke(clikan, ["restore"]).exit_code == 2
+    assert runner.invoke(main, ["add"]).exit_code == 2
+    assert runner.invoke(main, ["edit", "1"]).exit_code == 2
+    assert runner.invoke(main, ["promote"]).exit_code == 2
+    assert runner.invoke(main, ["restore"]).exit_code == 2
 
 
 def test_repaint_outputs_board(runner, write_config):
     write_config(repaint=True)
 
-    result = runner.invoke(clikan, ["add", "task"])
+    result = runner.invoke(main, ["add", "task"])
 
     assert result.exit_code == 0
     assert "task" in result.output
@@ -158,7 +158,7 @@ def test_repaint_outputs_board(runner, write_config):
 def test_invalid_task_id_returns_failure(runner, write_config):
     write_config()
 
-    result = runner.invoke(clikan, ["regress", "abc"])
+    result = runner.invoke(main, ["regress", "abc"])
 
     assert result.exit_code == 1
     assert "Invalid task id" in result.output
@@ -167,7 +167,7 @@ def test_invalid_task_id_returns_failure(runner, write_config):
 def test_unknown_task_id_returns_failure(runner, write_config):
     write_config()
 
-    result = runner.invoke(clikan, ["promote", "99"])
+    result = runner.invoke(main, ["promote", "99"])
 
     assert result.exit_code == 1
     assert "No existing task with that id: 99" in result.output
@@ -175,10 +175,10 @@ def test_unknown_task_id_returns_failure(runner, write_config):
 
 def test_mixed_batch_returns_failure_if_any_item_fails(runner, write_config):
     write_config(limits={"wip": 1})
-    runner.invoke(clikan, ["add", "one"])
-    runner.invoke(clikan, ["add", "two"])
+    runner.invoke(main, ["add", "one"])
+    runner.invoke(main, ["add", "two"])
 
-    result = runner.invoke(clikan, ["promote", "1", "2"])
+    result = runner.invoke(main, ["promote", "1", "2"])
 
     assert result.exit_code == 1
     assert "Promoting task 1 to in-progress." in result.output
@@ -187,11 +187,11 @@ def test_mixed_batch_returns_failure_if_any_item_fails(runner, write_config):
 
 def test_show_reads_existing_data_without_writer_lock(runner, write_config):
     config = write_config()
-    runner.invoke(clikan, ["add", "task"])
-    lock_path = Path(f"{config.clikan_data}.lock")
+    runner.invoke(main, ["add", "task"])
+    lock_path = Path(f"{config.data_path}.lock")
     lock_path.mkdir()
 
-    result = runner.invoke(clikan, ["show"])
+    result = runner.invoke(main, ["show"])
 
     assert result.exit_code == 0
     assert "task" in result.output
@@ -199,9 +199,9 @@ def test_show_reads_existing_data_without_writer_lock(runner, write_config):
 
 def test_show_json_is_machine_readable(runner, write_config):
     write_config()
-    runner.invoke(clikan, ["add", "json", "task"])
+    runner.invoke(main, ["add", "json", "task"])
 
-    result = runner.invoke(clikan, ["show", "--format", "json"])
+    result = runner.invoke(main, ["show", "--format", "json"])
     payload = json.loads(result.output)
     created_at = datetime.fromisoformat(payload["tasks"][0]["created_at"])
 
@@ -215,9 +215,9 @@ def test_show_json_is_machine_readable(runner, write_config):
 
 def test_show_plain_is_color_free(runner, write_config):
     write_config()
-    runner.invoke(clikan, ["add", "plain", "task"])
+    runner.invoke(main, ["add", "plain", "task"])
 
-    result = runner.invoke(clikan, ["show", "--format", "plain"])
+    result = runner.invoke(main, ["show", "--format", "plain"])
 
     assert result.exit_code == 0
     assert result.output.startswith("id\tstate\ttext\tcreated_at\tmodified_at\n")
@@ -228,6 +228,6 @@ def test_show_plain_is_color_free(runner, write_config):
 def test_show_rejects_unknown_format(runner, write_config):
     write_config()
 
-    result = runner.invoke(clikan, ["show", "--format", "xml"])
+    result = runner.invoke(main, ["show", "--format", "xml"])
 
     assert result.exit_code == 2
