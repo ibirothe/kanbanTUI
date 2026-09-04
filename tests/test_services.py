@@ -8,6 +8,7 @@ from kanban_tui.services import (
     edit_task,
     promote_tasks,
     regress_tasks,
+    reorder_task,
     restore_tasks,
 )
 
@@ -24,8 +25,8 @@ def base_config(**limits):
     )
 
 
-def task(task_id, state, text):
-    return Task(task_id, state, text, NOW, BEFORE)
+def task(task_id, state, text, position=0):
+    return Task(task_id, state, text, NOW, BEFORE, position=position)
 
 
 def test_add_and_delete_tasks():
@@ -37,6 +38,7 @@ def test_add_and_delete_tasks():
     assert len(board.active) == 1
     assert 1 in board.deleted
     assert board.deleted[1].state is TaskState.DELETED
+    assert board.active[2].position == 1
     assert add_result.succeeded == 2
     assert add_result.failed == 0
     assert "Creating new task w/ id: 1 -> one" in add_result.messages
@@ -72,8 +74,8 @@ def test_deleted_highest_id_is_not_reused():
     assert board.deleted[3].text == "three"
 
 
-def test_edit_updates_text_without_changing_task_identity_or_state():
-    original = task(1, TaskState.IN_PROGRESS, "old")
+def test_edit_updates_text_without_changing_task_identity_state_or_position():
+    original = task(1, TaskState.IN_PROGRESS, "old", position=4)
     board = Board(active={1: original})
 
     result = edit_task(base_config(), board, "1", "  new task text  ")
@@ -82,6 +84,7 @@ def test_edit_updates_text_without_changing_task_identity_or_state():
     assert board.active[1].id == 1
     assert board.active[1].state is TaskState.IN_PROGRESS
     assert board.active[1].text == "new task text"
+    assert board.active[1].position == 4
     assert board.active[1].created_at == BEFORE
     assert board.active[1].modified_at != NOW
     assert board.active[1].modified_at.tzinfo is not None
@@ -96,8 +99,11 @@ def test_edit_deleted_task_is_rejected():
     assert "Can not edit deleted task 1." in result.messages
 
 
-def test_restore_preserves_id_and_creation_time():
-    board = Board(deleted={1: task(1, TaskState.DELETED, "old")})
+def test_restore_preserves_id_creation_time_and_moves_to_bottom():
+    board = Board(
+        active={2: task(2, TaskState.TODO, "active", position=1)},
+        deleted={1: task(1, TaskState.DELETED, "old", position=9)},
+    )
 
     result = restore_tasks(base_config(), board, ["1"])
 
@@ -105,6 +111,7 @@ def test_restore_preserves_id_and_creation_time():
     assert 1 not in board.deleted
     assert board.active[1].id == 1
     assert board.active[1].state is TaskState.TODO
+    assert board.active[1].position == 2
     assert board.active[1].created_at == BEFORE
     assert board.active[1].modified_at != NOW
     assert board.active[1].modified_at.tzinfo is not None
@@ -131,7 +138,9 @@ def test_batch_promotion_respects_wip_limit():
     result = promote_tasks(config, board, ["1", "2"])
 
     assert board.active[1].state is TaskState.IN_PROGRESS
+    assert board.active[1].position == 1
     assert board.active[2].state is TaskState.TODO
+    assert board.active[2].position == 1
     assert result.succeeded == 1
     assert result.failed == 1
     assert "Can not promote, in-progress limit of 1 reached." in result.messages
@@ -153,14 +162,20 @@ def test_regress_done_respects_wip_limit():
     assert "Can not regress, in-progress limit of 1 reached." in result.messages
 
 
-def test_regress_inprogress_returns_to_todo():
-    board = Board(active={1: task(1, TaskState.IN_PROGRESS, "one")})
+def test_regress_inprogress_returns_to_todo_at_bottom():
+    board = Board(
+        active={
+            1: task(1, TaskState.TODO, "existing", position=1),
+            2: task(2, TaskState.IN_PROGRESS, "moving", position=1),
+        }
+    )
 
-    result = regress_tasks(base_config(), board, ["1"])
+    result = regress_tasks(base_config(), board, ["2"])
 
-    assert board.active[1].state is TaskState.TODO
+    assert board.active[2].state is TaskState.TODO
+    assert board.active[2].position == 2
     assert result.succeeded == 1
-    assert "Regressing task 1 to todo." in result.messages
+    assert "Regressing task 2 to todo." in result.messages
 
 
 def test_regress_inprogress_respects_todo_limit():
@@ -195,3 +210,43 @@ def test_batch_regression_respects_live_todo_capacity():
     assert result.succeeded == 1
     assert result.failed == 1
     assert "Can not regress, todo limit of 1 reached." in result.messages
+
+
+def test_reorder_task_supports_top_bottom_before_and_after():
+    board = Board(
+        active={
+            1: task(1, TaskState.TODO, "one", position=1),
+            2: task(2, TaskState.TODO, "two", position=2),
+            3: task(3, TaskState.TODO, "three", position=3),
+        }
+    )
+
+    assert reorder_task(board, "3", "top").ok
+    assert [task.id for task in board.ordered_tasks(TaskState.TODO)] == [3, 1, 2]
+
+    assert reorder_task(board, "3", "bottom").ok
+    assert [task.id for task in board.ordered_tasks(TaskState.TODO)] == [1, 2, 3]
+
+    assert reorder_task(board, "3", "before", "2").ok
+    assert [task.id for task in board.ordered_tasks(TaskState.TODO)] == [1, 3, 2]
+
+    assert reorder_task(board, "1", "after", "3").ok
+    assert [task.id for task in board.ordered_tasks(TaskState.TODO)] == [3, 1, 2]
+
+
+def test_reorder_rejects_cross_column_reference_and_done_tasks():
+    board = Board(
+        active={
+            1: task(1, TaskState.TODO, "todo", position=1),
+            2: task(2, TaskState.IN_PROGRESS, "doing", position=1),
+            3: task(3, TaskState.DONE, "done", position=1),
+        }
+    )
+
+    cross_column = reorder_task(board, "1", "before", "2")
+    done = reorder_task(board, "3", "top")
+
+    assert cross_column.failed == 1
+    assert "same column" in cross_column.messages[0]
+    assert done.failed == 1
+    assert "completion time" in done.messages[0]
