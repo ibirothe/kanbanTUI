@@ -6,6 +6,7 @@ from kanban_tui.services import (
     add_tasks,
     delete_tasks,
     edit_task,
+    move_tasks_to_state,
     promote_tasks,
     regress_tasks,
     reorder_task,
@@ -41,8 +42,8 @@ def test_add_and_delete_tasks():
     assert board.active[2].position == 1
     assert add_result.succeeded == 2
     assert add_result.failed == 0
-    assert "Creating new task w/ id: 1 -> one" in add_result.messages
-    assert "Removed task 1." in delete_result.messages
+    assert "Added #1: one" in add_result.messages
+    assert "Archived #1." in delete_result.messages
 
 
 def test_add_normalizes_outer_whitespace_and_rejects_empty_text():
@@ -53,7 +54,7 @@ def test_add_normalizes_outer_whitespace_and_rejects_empty_text():
     assert board.active[1].text == "one"
     assert result.succeeded == 1
     assert result.failed == 1
-    assert "Task text cannot be empty." in result.messages
+    assert "Error: task text cannot be empty." in result.messages
 
 
 def test_deleted_highest_id_is_not_reused():
@@ -67,7 +68,7 @@ def test_deleted_highest_id_is_not_reused():
     assert 2 in board.deleted
     assert board.deleted[2].text == "two"
     assert 3 in board.active
-    assert "Creating new task w/ id: 3 -> three" in result.messages
+    assert "Added #3: three" in result.messages
 
     delete_tasks(board, ["3"])
     assert board.deleted[2].text == "two"
@@ -88,6 +89,7 @@ def test_edit_updates_text_without_changing_task_identity_state_or_position():
     assert board.active[1].created_at == BEFORE
     assert board.active[1].modified_at != NOW
     assert board.active[1].modified_at.tzinfo is not None
+    assert result.messages == ["Updated #1: new task text"]
 
 
 def test_edit_deleted_task_is_rejected():
@@ -96,7 +98,7 @@ def test_edit_deleted_task_is_rejected():
     result = edit_task(base_config(), board, "1", "new")
 
     assert result.failed == 1
-    assert "Can not edit deleted task 1." in result.messages
+    assert result.messages == ["Error: archived task #1 cannot be edited."]
 
 
 def test_restore_preserves_id_creation_time_and_moves_to_bottom():
@@ -115,6 +117,7 @@ def test_restore_preserves_id_creation_time_and_moves_to_bottom():
     assert board.active[1].created_at == BEFORE
     assert board.active[1].modified_at != NOW
     assert board.active[1].modified_at.tzinfo is not None
+    assert result.messages == ["Restored #1 to TODO."]
 
 
 def test_restore_respects_todo_limit():
@@ -127,7 +130,42 @@ def test_restore_respects_todo_limit():
 
     assert result.failed == 1
     assert 2 in board.deleted
-    assert "Can not restore, todo limit of 1 reached." in result.messages
+    assert result.messages == ["Error: TODO limit reached (1/1)."]
+
+
+def test_explicit_state_commands_move_directly_to_target_state():
+    board = Board(
+        active={
+            1: task(1, TaskState.TODO, "one", position=1),
+            2: task(2, TaskState.DONE, "two", position=2),
+        }
+    )
+    config = base_config()
+
+    start_result = move_tasks_to_state(config, board, ["1"], TaskState.IN_PROGRESS)
+    todo_result = move_tasks_to_state(config, board, ["2"], TaskState.TODO)
+    done_result = move_tasks_to_state(config, board, ["1"], TaskState.DONE)
+
+    assert start_result.messages == ["Started #1."]
+    assert todo_result.messages == ["Moved #2 to TODO."]
+    assert done_result.messages == ["Completed #1."]
+    assert board.active[1].state is TaskState.DONE
+    assert board.active[2].state is TaskState.TODO
+
+
+def test_explicit_state_command_rejects_same_state_and_capacity():
+    board = Board(
+        active={
+            1: task(1, TaskState.TODO, "one", position=1),
+            2: task(2, TaskState.TODO, "two", position=2),
+        }
+    )
+
+    same = move_tasks_to_state(base_config(), board, ["1"], TaskState.TODO)
+    full = move_tasks_to_state(base_config(wip=0), board, ["1"], TaskState.IN_PROGRESS)
+
+    assert same.messages == ["Error: task #1 is already TODO."]
+    assert full.messages == ["Error: WIP limit reached (0/0)."]
 
 
 def test_batch_promotion_respects_wip_limit():
@@ -143,7 +181,7 @@ def test_batch_promotion_respects_wip_limit():
     assert board.active[2].position == 1
     assert result.succeeded == 1
     assert result.failed == 1
-    assert "Can not promote, in-progress limit of 1 reached." in result.messages
+    assert result.messages == ["Started #1.", "Error: WIP limit reached (1/1)."]
 
 
 def test_regress_done_respects_wip_limit():
@@ -159,7 +197,7 @@ def test_regress_done_respects_wip_limit():
 
     assert board.active[2].state is TaskState.DONE
     assert result.failed == 1
-    assert "Can not regress, in-progress limit of 1 reached." in result.messages
+    assert result.messages == ["Error: WIP limit reached (1/1)."]
 
 
 def test_regress_inprogress_returns_to_todo_at_bottom():
@@ -175,7 +213,7 @@ def test_regress_inprogress_returns_to_todo_at_bottom():
     assert board.active[2].state is TaskState.TODO
     assert board.active[2].position == 2
     assert result.succeeded == 1
-    assert "Regressing task 2 to todo." in result.messages
+    assert result.messages == ["Moved #2 to TODO."]
 
 
 def test_regress_inprogress_respects_todo_limit():
@@ -191,7 +229,7 @@ def test_regress_inprogress_respects_todo_limit():
 
     assert board.active[2].state is TaskState.IN_PROGRESS
     assert result.failed == 1
-    assert "Can not regress, todo limit of 1 reached." in result.messages
+    assert result.messages == ["Error: TODO limit reached (1/1)."]
 
 
 def test_batch_regression_respects_live_todo_capacity():
@@ -209,7 +247,7 @@ def test_batch_regression_respects_live_todo_capacity():
     assert board.active[2].state is TaskState.IN_PROGRESS
     assert result.succeeded == 1
     assert result.failed == 1
-    assert "Can not regress, todo limit of 1 reached." in result.messages
+    assert result.messages == ["Moved #1 to TODO.", "Error: TODO limit reached (1/1)."]
 
 
 def test_reorder_task_supports_top_bottom_before_and_after():
