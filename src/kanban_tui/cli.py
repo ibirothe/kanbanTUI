@@ -13,6 +13,7 @@ from .services import (
     edit_task,
     promote_tasks,
     regress_tasks,
+    reorder_task,
     restore_tasks,
 )
 from .storage import datastore_lock, read_data, write_data
@@ -164,6 +165,25 @@ def regress(ids):
     with datastore_lock(config):
         board = read_data(config)
         result = regress_tasks(config, board, ids)
+        write_data(config, board)
+    _complete_operation(result, config)
+
+
+@main.command()
+@click.argument("task_id")
+@click.argument("target", type=click.Choice(["top", "bottom", "before", "after"]))
+@click.argument("reference_id", required=False)
+def move(task_id, target, reference_id):
+    """Reorder a TODO or in-progress task within its current column."""
+    if target in {"before", "after"} and reference_id is None:
+        raise click.UsageError(f"{target} requires REFERENCE_ID")
+    if target in {"top", "bottom"} and reference_id is not None:
+        raise click.UsageError(f"{target} does not accept REFERENCE_ID")
+
+    config = _read_config()
+    with datastore_lock(config):
+        board = read_data(config)
+        result = reorder_task(board, task_id, target, reference_id)
         write_data(config, board)
     _complete_operation(result, config)
 
