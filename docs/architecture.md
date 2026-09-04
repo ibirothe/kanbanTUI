@@ -5,16 +5,16 @@
 Production code lives under `src/kanban_tui/`.
 
 - `__init__.py` — package version lookup.
-- `cli.py` — Click command definitions, global board/config selection, transfer/undo commands, and user-facing wiring.
+- `cli.py` — Click command definitions, global board/config selection, metadata/transfer/undo commands, and user-facing wiring.
 - `config.py` — config path resolution, named-board paths, YAML parsing/writing, defaults, validation, and supported config edits.
-- `models.py` — typed domain models: `TaskState`, `Task`, `Limits`, `AppConfig`, and `Board`.
-- `services.py` — task creation, deletion, editing, state transitions, ordering, and board business rules.
+- `models.py` — typed domain models: `TaskState`, `TaskPriority`, `Task`, `Limits`, `AppConfig`, and `Board`.
+- `services.py` — task creation, deletion, editing, metadata, state transitions, ordering, and board business rules.
 - `storage.py` — datastore locking, YAML deserialization/serialization, atomic writes, and one-level undo snapshots.
 - `transfer.py` — complete versioned JSON export/import validation and merge behavior.
-- `rendering.py` — Rich, plain, JSON, filtering, sorting, and history rendering.
+- `rendering.py` — Rich, plain, JSON, metadata filtering, sorting, and history rendering.
 - `tui.py` — Textual full-screen interface that reuses the same config, services, storage, and rendering helpers.
 
-Tests live under `tests/` and mirror these responsibilities where practical. Shared temporary-home/config fixtures live in `tests/conftest.py`; explicit multi-board behavior is covered in `tests/test_multiboard.py` and `tests/test_board_config_cli.py`, transfer behavior in `tests/test_transfer.py`, undo semantics in `tests/test_undo.py`, and Textual behavior is exercised headlessly in `tests/test_tui.py`.
+Tests live under `tests/` and mirror these responsibilities where practical. Shared temporary-home/config fixtures live in `tests/conftest.py`; explicit multi-board behavior is covered in `tests/test_multiboard.py` and `tests/test_board_config_cli.py`, metadata in `tests/test_metadata.py`, transfer behavior in `tests/test_transfer.py`, undo semantics in `tests/test_undo.py`, and Textual behavior is exercised headlessly in `tests/test_tui.py`.
 
 ## Runtime flow
 
@@ -32,9 +32,9 @@ For mutating commands and TUI actions:
 
 ## Interactive TUI
 
-`kanban-tui tui` runs a Textual application with TODO, IN PROGRESS, and DONE columns. Selection, search, editing, state movement, archiving, restoring, reprioritization, and undo are UI actions only; they do not duplicate business rules.
+`kanban-tui tui` runs a Textual application with TODO, IN PROGRESS, and DONE columns. Selection, search, editing, metadata, state movement, archiving, restoring, reprioritization, and undo are UI actions only; they do not duplicate business rules.
 
-The TUI calls the same service and persistence functions used by Click commands, so capacity limits, validation, timestamps, ordering, ID integrity, locking, undo behavior, and persistence semantics remain identical across interfaces. Dynamic `ListView` refreshes await Textual DOM updates before assigning selection/focus, which keeps keyboard operation deterministic and supports headless `App.run_test()` tests.
+The TUI calls the same service and persistence functions used by Click commands, so capacity limits, validation, metadata normalization, timestamps, ordering, ID integrity, locking, undo behavior, and persistence semantics remain identical across interfaces. Dynamic `ListView` refreshes await Textual DOM updates before assigning selection/focus, which keeps keyboard operation deterministic and supports headless `App.run_test()` tests.
 
 ## Task states and limits
 
@@ -45,7 +45,7 @@ The TUI calls the same service and persistence functions used by Click commands,
 - `done`
 - `deleted`
 
-Normal progression is `todo -> inprogress -> done`. Direct state commands can target TODO, IN PROGRESS, or DONE through shared transition logic. Deletion moves a task from the active collection to the deleted collection. `restore` moves a deleted task back to TODO while preserving its ID and creation timestamp.
+Normal progression is `todo -> inprogress -> done`. Direct state commands can target TODO, IN PROGRESS, or DONE through shared transition logic. Deletion moves a task from the active collection to the deleted collection. `restore` moves a deleted task back to TODO while preserving its ID, creation timestamp, priority, and tags.
 
 Capacity limits are invariants on entry into a constrained state: every transition into `inprogress` enforces `limits.wip`, and every transition into `todo` enforces `limits.todo` when configured.
 
@@ -56,6 +56,20 @@ Task IDs are unique across both active and deleted history. New IDs are allocate
 TODO and IN PROGRESS tasks persist a numeric `position`. Legacy four-field task records remain valid; their task ID is used as the initial position when no explicit position is stored. New writes add the position as the fifth record field.
 
 Within TODO and IN PROGRESS, rendering uses `(position, id)` ordering. Reordering compacts positions to deterministic consecutive values. New tasks and tasks entering a manually ordered state are placed at the bottom of that state. DONE remains ordered by `modified_at` descending, which represents completion/last-transition time.
+
+Priority is intentionally independent from manual position; assigning `urgent` does not reorder a task automatically.
+
+## Lightweight task metadata
+
+`TaskPriority` supports four optional values: `low`, `normal`, `high`, and `urgent`. A task with no priority stores `None`.
+
+Tags are optional normalized lowercase slugs. Valid tags are 1–32 characters, begin with a letter or number, and may otherwise contain lowercase letters, numbers, `-`, or `_`. Tags are deduplicated and stored deterministically.
+
+Metadata mutations update `modified_at`, use the normal writer lock and undo mechanism, and apply only to active tasks. Archiving/restoring preserves metadata.
+
+Rendering shows metadata inline (`!urgent`, `#backend`) and structured outputs expose `priority` and `tags` fields. `show --priority` and `show --tag` filter without mutating the board. General search also matches task text, tags, and priority values.
+
+The TUI exposes priority cycling and complete tag-set editing through the same service functions used by the CLI.
 
 ## Configuration and board selection
 
@@ -96,7 +110,7 @@ Config-file writes use a temporary sibling file, flush and `fsync`, and then `os
 
 ## Datastore format and timestamps
 
-Task records are compact YAML lists for simple local persistence. The current record shape is:
+Task records are compact YAML lists for simple local persistence. A task with metadata may look like:
 
 ```yaml
 data:
@@ -106,14 +120,18 @@ data:
     - '2026-09-04T10:00:00+02:00'
     - '2026-09-04T09:00:00+02:00'
     - 1
+    - priority: urgent
+      tags:
+        - backend
+        - bug
 deleted: {}
 ```
 
-The fields are state, text, modified timestamp, creation timestamp, and manual position. Older four-field records remain readable and acquire an explicit position on their next write.
+The first five fields are state, text, modified timestamp, creation timestamp, and manual position. The optional sixth field is a metadata mapping containing `priority` and/or `tags`. Tasks without metadata remain five-field records. Older four-field records remain readable and acquire an explicit position on their next write.
 
 New writes use timezone-aware ISO 8601 timestamps. The model boundary also accepts the earlier timestamp form such as `2026-Sep-04 10:00:00`. Naive timestamps are interpreted in the machine's local timezone for that date and normalized to timezone-aware `datetime` values inside the domain model.
 
-`created_at` is the original task creation time. `modified_at` is the time of the most recent edit or state transition. DONE tasks are ordered by `modified_at` descending, so `limits.done` selects the most recently completed tasks.
+`created_at` is the original task creation time. `modified_at` is the time of the most recent edit, metadata change, or state transition. DONE tasks are ordered by `modified_at` descending, so `limits.done` selects the most recently modified/completed DONE tasks.
 
 ## Undo snapshots
 
@@ -136,7 +154,7 @@ The current envelope is identified by:
 }
 ```
 
-A complete export contains every active and archived task, including ID, state, text, creation/modification timestamps, and manual position. DONE display limits, search filters, and temporary view sorting never affect exports.
+A complete export contains every active and archived task, including ID, state, text, creation/modification timestamps, manual position, priority, and tags. Priority/tags are optional on import, so earlier version-1 exports remain valid. DONE display limits, search filters, and temporary view sorting never affect exports.
 
 Imports are fully parsed into a `Board` before persistence. `replace` substitutes the selected board; `merge` keeps the current board and adds imported tasks after rejecting all ID collisions. TODO/WIP capacity limits are validated on the complete candidate board before writing. Successful imports participate in the same undo mechanism as other mutations.
 
