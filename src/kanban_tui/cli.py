@@ -6,7 +6,7 @@ from click_default_group import DefaultGroup
 from . import VERSION
 from .config import create_default_config, get_config_path, read_config
 from .models import TaskState
-from .rendering import render_board, render_history
+from .rendering import SORT_CHOICES, render_board, render_history
 from .services import (
     OperationResult,
     add_tasks,
@@ -220,10 +220,24 @@ def move(task_id, target, reference_id):
     _complete_operation(result, config)
 
 
-def display(output_format: str = "table") -> None:
+def display(
+    output_format: str = "table",
+    *,
+    state_filter: TaskState | None = None,
+    search: str | None = None,
+    sort_by: str = "default",
+) -> None:
     config = _read_config()
     board = read_data(config, initialize_missing=False)
-    render_board(config, board, VERSION, output_format)
+    render_board(
+        config,
+        board,
+        VERSION,
+        output_format,
+        state_filter=state_filter,
+        search=search,
+        sort_by=sort_by,
+    )
 
 
 @main.command()
@@ -234,9 +248,30 @@ def display(output_format: str = "table") -> None:
     default="table",
     show_default=True,
 )
-def show(output_format):
+@click.option(
+    "--state",
+    "state_name",
+    type=click.Choice(["todo", "inprogress", "done"], case_sensitive=False),
+    default=None,
+    help="Show only one task state.",
+)
+@click.option("--search", default=None, help="Show tasks whose text contains this value.")
+@click.option(
+    "--sort",
+    "sort_by",
+    type=click.Choice(SORT_CHOICES, case_sensitive=False),
+    default="default",
+    show_default=True,
+)
+def show(output_format, state_name, search, sort_by):
     """Show the board."""
-    display(output_format.lower())
+    state_filter = TaskState(state_name.lower()) if state_name else None
+    display(
+        output_format.lower(),
+        state_filter=state_filter,
+        search=search,
+        sort_by=sort_by.lower(),
+    )
 
 
 @main.command()
