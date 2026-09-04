@@ -53,8 +53,17 @@ def todo_limit_reached(config: AppConfig, board: Board) -> bool:
     return state_limit_reached(config, board, TaskState.TODO)
 
 
-def _normalize_task_text(text: str) -> str:
-    return text.strip()
+def _validate_task_text(config: AppConfig, raw_text: str) -> tuple[str | None, str | None]:
+    text = raw_text.strip()
+    if not text:
+        return None, "Task text cannot be empty."
+    if len(text) > config.limits.taskname:
+        return (
+            None,
+            "Task must be at most %s chars, Brevity counts: %s"
+            % (config.limits.taskname, text),
+        )
+    return text, None
 
 
 def add_tasks(
@@ -63,17 +72,11 @@ def add_tasks(
     result = OperationResult()
 
     for raw_text in tasks:
-        text = _normalize_task_text(raw_text)
-        if not text:
-            result.failure("Task text cannot be empty.")
+        text, error = _validate_task_text(config, raw_text)
+        if error is not None:
+            result.failure(error)
             continue
-
-        if len(text) > config.limits.taskname:
-            result.failure(
-                "Task must be at most %s chars, Brevity counts: %s"
-                % (config.limits.taskname, text)
-            )
-            continue
+        assert text is not None
 
         if todo_limit_reached(config, board):
             result.failure("No new todos, limit reached already.")
@@ -90,6 +93,37 @@ def add_tasks(
         )
         result.success("Creating new task w/ id: %d -> %s" % (task_id, text))
 
+    return result
+
+
+def edit_task(
+    config: AppConfig, board: Board, task_id: str, raw_text: str
+) -> OperationResult:
+    result = OperationResult()
+    try:
+        numeric_id = int(task_id)
+    except (TypeError, ValueError):
+        result.failure("Invalid task id")
+        return result
+
+    if numeric_id in board.deleted:
+        result.failure("Can not edit deleted task %d." % numeric_id)
+        return result
+
+    task = board.active.get(numeric_id)
+    if task is None:
+        result.failure("No existing task with that id: %d" % numeric_id)
+        return result
+
+    text, error = _validate_task_text(config, raw_text)
+    if error is not None:
+        result.failure(error)
+        return result
+    assert text is not None
+
+    task.text = text
+    task.modified_at = timestamp()
+    result.success("Updated task %d -> %s" % (numeric_id, text))
     return result
 
 
@@ -112,6 +146,41 @@ def delete_tasks(board: Board, ids: Iterable[str]) -> OperationResult:
         board.deleted[numeric_id] = task
         board.active.pop(numeric_id)
         result.success("Removed task %d." % numeric_id)
+
+    return result
+
+
+def restore_tasks(
+    config: AppConfig, board: Board, ids: Iterable[str]
+) -> OperationResult:
+    result = OperationResult()
+    for task_id in ids:
+        try:
+            numeric_id = int(task_id)
+        except (TypeError, ValueError):
+            result.failure("Invalid task id")
+            continue
+
+        if numeric_id in board.active:
+            result.failure("Task id %d is already active." % numeric_id)
+            continue
+
+        task = board.deleted.get(numeric_id)
+        if task is None:
+            result.failure("No deleted task with that id: %d" % numeric_id)
+            continue
+
+        if todo_limit_reached(config, board):
+            result.failure(
+                "Can not restore, todo limit of %s reached." % config.limits.todo
+            )
+            continue
+
+        task.state = TaskState.TODO
+        task.modified_at = timestamp()
+        board.active[numeric_id] = task
+        board.deleted.pop(numeric_id)
+        result.success("Restored task %d to todo." % numeric_id)
 
     return result
 
