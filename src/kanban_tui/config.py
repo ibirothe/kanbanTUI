@@ -1,10 +1,17 @@
 import os
+import re
+import tempfile
 from pathlib import Path
+from typing import Any
 
 import click
 import yaml
 
 from .models import AppConfig, Limits
+
+
+BOARD_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+LIMIT_NAMES = {"todo", "wip", "done", "taskname"}
 
 
 def get_app_home() -> Path:
@@ -17,6 +24,37 @@ def get_config_path(explicit_path: Path | None = None) -> Path:
     if explicit_path is not None:
         return explicit_path.expanduser().resolve()
     return get_app_home() / ".kanban-tui.yaml"
+
+
+def validate_board_name(name: str) -> str:
+    normalized = name.strip().lower()
+    if not BOARD_NAME_PATTERN.fullmatch(normalized):
+        raise click.ClickException(
+            "Board names must start with a letter or number and contain only "
+            "lowercase letters, numbers, '-' or '_'."
+        )
+    return normalized
+
+
+def get_boards_dir() -> Path:
+    return get_app_home() / "boards"
+
+
+def get_board_config_path(name: str) -> Path:
+    return get_boards_dir() / f"{validate_board_name(name)}.yaml"
+
+
+def list_named_boards() -> list[str]:
+    boards_dir = get_boards_dir()
+    if not boards_dir.exists():
+        return []
+
+    names = []
+    for path in boards_dir.glob("*.yaml"):
+        name = path.stem
+        if BOARD_NAME_PATTERN.fullmatch(name):
+            names.append(name)
+    return sorted(names)
 
 
 def _resolve_data_path(raw_path: str, config_path: Path) -> Path:
@@ -56,8 +94,7 @@ def validate_config(config, config_path: Path) -> AppConfig:
     )
 
 
-def read_config(explicit_path: Path | None = None) -> AppConfig:
-    config_path = get_config_path(explicit_path)
+def _read_yaml_document(config_path: Path) -> dict[str, Any]:
     try:
         with config_path.open("r", encoding="utf-8") as stream:
             try:
@@ -65,28 +102,127 @@ def read_config(explicit_path: Path | None = None) -> AppConfig:
             except yaml.YAMLError as exc:
                 raise click.ClickException(
                     f"Config file {config_path} contains invalid YAML: {exc}"
-                )
+                ) from exc
     except OSError as exc:
         raise click.ClickException(
             f"Could not read config file {config_path}: {exc}"
-        )
+        ) from exc
 
-    return validate_config(config, config_path)
+    if not isinstance(config, dict):
+        raise click.ClickException(
+            f"Config file {config_path} must contain a YAML mapping."
+        )
+    return config
+
+
+def read_config_document(explicit_path: Path | None = None) -> dict[str, Any]:
+    config_path = get_config_path(explicit_path)
+    config = _read_yaml_document(config_path)
+    validate_config(config, config_path)
+    return config
+
+
+def read_config(explicit_path: Path | None = None) -> AppConfig:
+    config_path = get_config_path(explicit_path)
+    return validate_config(_read_yaml_document(config_path), config_path)
+
+
+def _atomic_write_config(config_path: Path, config: dict[str, Any]) -> None:
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=config_path.parent,
+            prefix=f".{config_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as outfile:
+            yaml.safe_dump(config, outfile, default_flow_style=False, sort_keys=False)
+            outfile.flush()
+            os.fsync(outfile.fileno())
+            temporary_path = Path(outfile.name)
+        os.replace(temporary_path, config_path)
+    except OSError as exc:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+        raise click.ClickException(
+            f"Could not write config file {config_path}: {exc}"
+        ) from exc
+
+
+def write_config_document(
+    config: dict[str, Any], explicit_path: Path | None = None
+) -> Path:
+    config_path = get_config_path(explicit_path)
+    validate_config(config, config_path)
+    _atomic_write_config(config_path, config)
+    return config_path
 
 
 def create_default_config(explicit_path: Path | None = None) -> Path:
     config_path = get_config_path(explicit_path)
     data_path = config_path.with_suffix(".dat")
-    try:
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        with config_path.open("w", encoding="utf-8") as outfile:
-            yaml.safe_dump(
-                {"data_path": str(data_path)},
-                outfile,
-                default_flow_style=False,
-            )
-    except OSError as exc:
-        raise click.ClickException(
-            f"Could not write config file {config_path}: {exc}"
-        )
+    _atomic_write_config(config_path, {"data_path": str(data_path)})
     return config_path
+
+
+def create_named_board(name: str) -> Path:
+    normalized = validate_board_name(name)
+    config_path = get_board_config_path(normalized)
+    if config_path.exists():
+        raise click.ClickException(f"Board '{normalized}' already exists.")
+    return create_default_config(config_path)
+
+
+def set_config_value(
+    key: str,
+    value: str,
+    explicit_path: Path | None = None,
+) -> Path:
+    config_path = get_config_path(explicit_path)
+    config = read_config_document(config_path)
+    normalized_key = key.strip().lower()
+
+    if normalized_key == "data_path":
+        if not value.strip():
+            raise click.ClickException("data_path cannot be empty.")
+        config["data_path"] = value.strip()
+    elif normalized_key == "repaint":
+        normalized_value = value.strip().lower()
+        if normalized_value not in {"true", "false"}:
+            raise click.ClickException("repaint must be true or false.")
+        config["repaint"] = normalized_value == "true"
+    elif normalized_key.startswith("limits."):
+        limit_name = normalized_key.split(".", 1)[1]
+        if limit_name not in LIMIT_NAMES:
+            raise click.ClickException(f"Unknown configuration key: {key}")
+
+        limits = config.setdefault("limits", {})
+        if not isinstance(limits, dict):
+            raise click.ClickException("limits must be a mapping.")
+
+        normalized_value = value.strip().lower()
+        if normalized_value in {"none", "null", "unlimited"}:
+            if limit_name not in {"todo", "wip"}:
+                raise click.ClickException(
+                    f"limits.{limit_name} requires a non-negative integer."
+                )
+            limits.pop(limit_name, None)
+        else:
+            try:
+                parsed = int(value)
+            except ValueError as exc:
+                raise click.ClickException(
+                    f"limits.{limit_name} requires a non-negative integer."
+                ) from exc
+            if parsed < 0:
+                raise click.ClickException(
+                    f"limits.{limit_name} requires a non-negative integer."
+                )
+            limits[limit_name] = parsed
+    else:
+        raise click.ClickException(f"Unknown configuration key: {key}")
+
+    return write_config_document(config, config_path)
