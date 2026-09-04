@@ -7,7 +7,7 @@ from typing import Any
 
 import click
 
-from .models import AppConfig, Board, Task, TaskState, format_timestamp, parse_timestamp
+from .models import AppConfig, Board, Task, TaskPriority, TaskState, format_timestamp, parse_timestamp
 
 
 EXPORT_FORMAT = "kanbanTUI-board"
@@ -22,6 +22,8 @@ def _task_payload(task: Task) -> dict[str, object]:
         "created_at": format_timestamp(task.created_at),
         "modified_at": format_timestamp(task.modified_at),
         "position": task.position,
+        "priority": task.priority.value if task.priority is not None else None,
+        "tags": list(task.tags),
     }
 
 
@@ -66,20 +68,35 @@ def _parse_task(raw: Any, *, archived: bool) -> Task:
     if isinstance(position, bool) or not isinstance(position, int) or position < 1:
         raise ValueError(f"task {task_id} position must be a positive integer")
 
+    raw_priority = raw.get("priority")
+    if raw_priority is not None:
+        try:
+            priority: TaskPriority | None = TaskPriority(raw_priority)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"task {task_id} has an invalid priority") from exc
+    else:
+        priority = None
+
+    raw_tags = raw.get("tags", [])
+    if not isinstance(raw_tags, list):
+        raise ValueError(f"task {task_id} tags must be an array")
+
     try:
         created_at = parse_timestamp(raw.get("created_at"))
         modified_at = parse_timestamp(raw.get("modified_at"))
+        task = Task(
+            id=task_id,
+            state=state,
+            text=text,
+            created_at=created_at,
+            modified_at=modified_at,
+            position=position,
+            priority=priority,
+            tags=tuple(raw_tags),
+        )
     except ValueError as exc:
-        raise ValueError(f"task {task_id} has an invalid timestamp: {exc}") from exc
-
-    return Task(
-        id=task_id,
-        state=state,
-        text=text,
-        created_at=created_at,
-        modified_at=modified_at,
-        position=position,
-    )
+        raise ValueError(f"task {task_id} has invalid metadata or timestamp: {exc}") from exc
+    return task
 
 
 def board_from_export(payload: Any) -> Board:
