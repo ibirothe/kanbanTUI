@@ -28,9 +28,13 @@ def split_items(board: Board):
     return todos, inprogs, dones
 
 
-def render_board(config: AppConfig, board: Board, version: str) -> None:
+def board_columns(config: AppConfig, board: Board):
     todos, inprogs, dones = split_items(board)
-    dones = dones[: config.limits.done]
+    return todos, inprogs, dones[: config.limits.done]
+
+
+def render_board(config: AppConfig, board: Board, version: str) -> None:
+    todos, inprogs, dones = board_columns(config, board)
 
     table = Table(show_header=True, show_footer=True)
     table.add_column(
