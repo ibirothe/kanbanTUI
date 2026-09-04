@@ -11,6 +11,7 @@ from .models import AppConfig, Limits
 
 
 BOARD_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+RESERVED_BOARD_NAMES = {"default"}
 LIMIT_NAMES = {"todo", "wip", "done", "taskname"}
 
 
@@ -32,6 +33,8 @@ def validate_board_name(name: str) -> str:
         raise click.ClickException(
             "Board names are lowercase slugs containing letters, numbers, '-' or '_'."
         )
+    if normalized in RESERVED_BOARD_NAMES:
+        raise click.ClickException(f"Board name '{normalized}' is reserved.")
     return normalized
 
 
@@ -51,7 +54,7 @@ def list_named_boards() -> list[str]:
     names = []
     for path in boards_dir.glob("*.yaml"):
         name = path.stem
-        if BOARD_NAME_PATTERN.fullmatch(name):
+        if BOARD_NAME_PATTERN.fullmatch(name) and name not in RESERVED_BOARD_NAMES:
             names.append(name)
     return sorted(names)
 
