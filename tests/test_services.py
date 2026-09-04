@@ -1,7 +1,14 @@
 from pathlib import Path
 
 from kanban_tui.models import AppConfig, Board, Limits, Task, TaskState
-from kanban_tui.services import add_tasks, delete_tasks, promote_tasks, regress_tasks
+from kanban_tui.services import (
+    add_tasks,
+    delete_tasks,
+    edit_task,
+    promote_tasks,
+    regress_tasks,
+    restore_tasks,
+)
 
 
 def base_config(**limits):
@@ -54,6 +61,59 @@ def test_deleted_highest_id_is_not_reused():
     delete_tasks(board, ["3"])
     assert board.deleted[2].text == "two"
     assert board.deleted[3].text == "three"
+
+
+def test_edit_updates_text_without_changing_task_identity_or_state():
+    task = Task(1, TaskState.IN_PROGRESS, "old", "old-modified", "created")
+    board = Board(active={1: task})
+
+    result = edit_task(base_config(), board, "1", "  new task text  ")
+
+    assert result.succeeded == 1
+    assert board.active[1].id == 1
+    assert board.active[1].state is TaskState.IN_PROGRESS
+    assert board.active[1].text == "new task text"
+    assert board.active[1].created_at == "created"
+    assert board.active[1].modified_at != "old-modified"
+
+
+def test_edit_deleted_task_is_rejected():
+    board = Board(
+        deleted={1: Task(1, TaskState.DELETED, "old", "modified", "created")}
+    )
+
+    result = edit_task(base_config(), board, "1", "new")
+
+    assert result.failed == 1
+    assert "Can not edit deleted task 1." in result.messages
+
+
+def test_restore_preserves_id_and_creation_time():
+    board = Board(
+        deleted={1: Task(1, TaskState.DELETED, "old", "modified", "created")}
+    )
+
+    result = restore_tasks(base_config(), board, ["1"])
+
+    assert result.succeeded == 1
+    assert 1 not in board.deleted
+    assert board.active[1].id == 1
+    assert board.active[1].state is TaskState.TODO
+    assert board.active[1].created_at == "created"
+    assert board.active[1].modified_at != "modified"
+
+
+def test_restore_respects_todo_limit():
+    board = Board(
+        active={1: Task(1, TaskState.TODO, "active", "now", "created")},
+        deleted={2: Task(2, TaskState.DELETED, "old", "now", "created")},
+    )
+
+    result = restore_tasks(base_config(todo=1), board, ["2"])
+
+    assert result.failed == 1
+    assert 2 in board.deleted
+    assert "Can not restore, todo limit of 1 reached." in result.messages
 
 
 def test_batch_promotion_respects_wip_limit():
