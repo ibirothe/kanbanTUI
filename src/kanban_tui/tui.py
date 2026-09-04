@@ -19,7 +19,7 @@ from .services import (
     reorder_task,
     restore_tasks,
 )
-from .storage import datastore_lock, read_data, write_data
+from .storage import datastore_lock, read_data, undo_last_change, write_data
 
 
 class PromptScreen(ModalScreen[str | None]):
@@ -120,6 +120,7 @@ class HelpScreen(ModalScreen[None]):
                 "e            edit selected task\n"
                 "d            archive selected task\n"
                 "r            restore archived task by ID\n"
+                "u            undo last board change\n"
                 "/            search/filter\n"
                 "c            clear filter\n"
                 "?            this help\n"
@@ -150,6 +151,7 @@ class KanbanApp(App[None]):
         Binding("e", "edit_task", "Edit"),
         Binding("d", "archive_task", "Archive"),
         Binding("r", "restore_task", "Restore"),
+        Binding("u", "undo", "Undo"),
         Binding("/", "search", "Search"),
         Binding("c", "clear_search", "Clear filter", show=False),
         Binding("left", "move_left", "Move left"),
@@ -340,7 +342,7 @@ class KanbanApp(App[None]):
                 board = read_data(self.config)
                 result = operation(board)
                 if result.succeeded:
-                    write_data(self.config, board)
+                    write_data(self.config, board, snapshot_previous=True)
             self.board = board
         except click.ClickException as exc:
             self._set_status(f"Error: {exc}")
@@ -410,6 +412,17 @@ class KanbanApp(App[None]):
             focus_task_id=task_id,
             focus_state=TaskState.TODO,
         )
+
+    async def action_undo(self) -> None:
+        try:
+            with datastore_lock(self.config):
+                self.board = undo_last_change(self.config)
+        except click.ClickException as exc:
+            self._set_status(str(exc))
+            return
+
+        self._set_status("Undid last board change.")
+        await self._refresh_board()
 
     def action_search(self) -> None:
         self.push_screen(
