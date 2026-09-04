@@ -57,6 +57,32 @@ kanban-tui --config ~/boards/work.yaml show
 
 `configure` honors the selected path and creates a datastore with the same basename and a `.dat` suffix. Relative `data_path` values are always resolved against the selected configuration file.
 
+## Interactive TUI
+
+Launch the full-screen board with:
+
+```bash
+kanban-tui tui
+```
+
+The TUI uses the same configuration, datastore, validation, capacity limits, ordering rules, and mutation services as the CLI.
+
+Keyboard controls:
+
+- `↑` / `↓` or `j` / `k`: select a task.
+- `←` / `→` or `h` / `l`: move the selected task between TODO, IN PROGRESS, and DONE.
+- `Shift+↑` / `Shift+↓`: reprioritize within TODO or IN PROGRESS.
+- `a`: add a task.
+- `e`: edit the selected task.
+- `d`: archive the selected task.
+- `r`: restore an archived task by ID.
+- `/`: search/filter the live board.
+- `c`: clear the current search filter.
+- `?`: show keyboard help.
+- `q`: quit.
+
+The CLI remains available for scripting and one-shot operations.
+
 ## Usage
 
 ```bash
@@ -131,6 +157,7 @@ src/kanban_tui/
   rendering.py
   services.py
   storage.py
+  tui.py
 
 tests/
   conftest.py
