@@ -86,14 +86,13 @@ Updated test suite to include 3.6-3.9 on Windows, macOS and Ubuntu.
 
 ***Definitely*** need some help here.  There is a basic test suite available in `clikan_test.py`.
 
-To run it, make sure ~/.clikan.dat is empty, or specify a test locale
-with the `CLIKAN_HOME` environment variable the you can run:
+Run it with:
 
 ```
-CLIKAN_HOME=/tmp pytest clikan_test.py
+pytest clikan_test.py
 ```
 
-The project uses this environment variable feature to test different functional configuration scenarios internally to the test suite.
+The test suite automatically assigns a temporary `CLIKAN_HOME` to every test. Each test creates its own configuration and datastore, so running the suite does not read or modify your real `~/.clikan.yaml` or Kanban data.
 
 Am considering adding the `--config_file` feature to allow for specifying the path to the config file as well.  If this is something you're interesting in or believe would be beneficial let me know through an Github issue.
 ## License
