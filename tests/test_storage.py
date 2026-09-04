@@ -1,5 +1,6 @@
 import os
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import click
@@ -13,6 +14,10 @@ from kanban_tui.storage import (
     read_data,
     write_data,
 )
+
+
+NOW = datetime(2026, 9, 4, 10, 0, tzinfo=timezone.utc)
+BEFORE = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
 
 
 def test_missing_datastore_is_initialized(write_config, isolated_clikan_home):
@@ -36,7 +41,7 @@ def test_missing_datastore_parent_is_created(write_config, tmp_path):
     assert data_path.exists()
 
 
-def test_write_data_round_trip(write_config):
+def test_write_data_round_trip_uses_iso_timestamps(write_config):
     config = write_config()
     board = Board(
         active={
@@ -44,8 +49,8 @@ def test_write_data_round_trip(write_config):
                 id=1,
                 state=TaskState.TODO,
                 text="task",
-                modified_at="now",
-                created_at="before",
+                modified_at=NOW,
+                created_at=BEFORE,
             )
         }
     )
@@ -54,7 +59,10 @@ def test_write_data_round_trip(write_config):
         write_data(config, board)
         loaded = read_data(config)
 
+    raw = yaml.safe_load(config.clikan_data.read_text(encoding="utf-8"))
     assert loaded == board
+    assert raw["data"][1][2] == "2026-09-04T10:00:00+00:00"
+    assert raw["data"][1][3] == "2026-09-04T09:00:00+00:00"
 
 
 def test_existing_live_lock_is_rejected(write_config):
@@ -100,12 +108,19 @@ def test_read_only_missing_datastore_does_not_initialize(write_config):
     assert not config.clikan_data.exists()
 
 
-def test_legacy_yaml_format_is_deserialized(write_config):
+def test_legacy_yaml_timestamp_format_is_deserialized(write_config):
     config = write_config()
     config.clikan_data.write_text(
         yaml.safe_dump(
             {
-                "data": {1: ["todo", "task", "now", "before"]},
+                "data": {
+                    1: [
+                        "todo",
+                        "task",
+                        "2026-Sep-04 10:00:00",
+                        "2026-Sep-04 09:00:00",
+                    ]
+                },
                 "deleted": {},
             }
         ),
@@ -117,6 +132,7 @@ def test_legacy_yaml_format_is_deserialized(write_config):
 
     assert board.active[1].state is TaskState.TODO
     assert board.active[1].text == "task"
+    assert board.active[1].modified_at.tzinfo is not None
 
 
 def test_invalid_datastore_record_is_rejected(write_config):
