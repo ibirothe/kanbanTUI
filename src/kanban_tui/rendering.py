@@ -1,23 +1,30 @@
 from rich.console import Console
 from rich.table import Table
 
-from .models import AppConfig, Board, TaskState
+from .models import AppConfig, Board, TaskState, format_timestamp
 
 
 def split_items(board: Board):
-    todos = []
-    inprogs = []
-    dones = []
-
-    for task_id, task in board.active.items():
-        label = f"[{task_id}] {task.text}"
-        if task.state is TaskState.TODO:
-            todos.append(label)
-        elif task.state is TaskState.IN_PROGRESS:
-            inprogs.append(label)
-        else:
-            dones.insert(0, label)
-
+    todos = [
+        f"[{task.id}] {task.text}"
+        for task in sorted(board.active.values(), key=lambda item: item.id)
+        if task.state is TaskState.TODO
+    ]
+    inprogs = [
+        f"[{task.id}] {task.text}"
+        for task in sorted(board.active.values(), key=lambda item: item.id)
+        if task.state is TaskState.IN_PROGRESS
+    ]
+    done_tasks = sorted(
+        (
+            task
+            for task in board.active.values()
+            if task.state is TaskState.DONE
+        ),
+        key=lambda task: (task.modified_at, task.id),
+        reverse=True,
+    )
+    dones = [f"[{task.id}] {task.text}" for task in done_tasks]
     return todos, inprogs, dones
 
 
@@ -46,13 +53,17 @@ def render_history(board: Board) -> None:
     table.add_column("deleted / modified")
     table.add_column("created")
 
-    for task_id in sorted(board.deleted, reverse=True):
-        task = board.deleted[task_id]
+    deleted_tasks = sorted(
+        board.deleted.values(),
+        key=lambda task: (task.modified_at, task.id),
+        reverse=True,
+    )
+    for task in deleted_tasks:
         table.add_row(
-            str(task_id),
+            str(task.id),
             task.text,
-            task.modified_at,
-            task.created_at,
+            format_timestamp(task.modified_at),
+            format_timestamp(task.created_at),
         )
 
     Console().print(table)
