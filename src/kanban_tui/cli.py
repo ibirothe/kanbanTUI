@@ -274,6 +274,15 @@ def show(output_format, state_name, search, sort_by):
     )
 
 
+@main.command(name="tui")
+def tui_command():
+    """Open the interactive full-screen board."""
+    config = _read_config()
+    from .tui import run_tui
+
+    run_tui(config)
+
+
 @main.command()
 def history():
     """Show archived task history."""
