@@ -120,14 +120,18 @@ def _transition_task(
         return _capacity_error(config, board, target_state)
 
     previous_state = task.state
+    now = timestamp()
     if target_state in {TaskState.TODO, TaskState.IN_PROGRESS}:
         _place_at_bottom(board, task, target_state)
+        if previous_state is TaskState.DONE:
+            task.completed_at = None
     else:
         task.state = target_state
+        task.completed_at = now
 
     if previous_state in {TaskState.TODO, TaskState.IN_PROGRESS}:
         board.normalize_positions(previous_state)
-    task.modified_at = timestamp()
+    task.modified_at = now
     return None
 
 
@@ -238,6 +242,7 @@ def restore_tasks(
             continue
 
         _place_at_bottom(board, task, TaskState.TODO)
+        task.completed_at = None
         task.modified_at = timestamp()
         board.active[numeric_id] = task
         board.deleted.pop(numeric_id)
@@ -353,17 +358,22 @@ def reorder_task(
         result.failure("Error: completed tasks are ordered by completion time.")
         return result
 
-    ordered = [
-        candidate
-        for candidate in board.ordered_tasks(task.state)
-        if candidate.id != task.id
-    ]
+    current_order = board.ordered_tasks(task.state)
+    current_index = next(
+        index for index, candidate in enumerate(current_order) if candidate.id == task.id
+    )
 
     if target == "top":
+        if current_index == 0:
+            result.failure(f"Error: task #{task.id} is already at top.")
+            return result
         insert_at = 0
         success_message = f"Moved #{task.id} to top."
     elif target == "bottom":
-        insert_at = len(ordered)
+        if current_index == len(current_order) - 1:
+            result.failure(f"Error: task #{task.id} is already at bottom.")
+            return result
+        insert_at = len(current_order) - 1
         success_message = f"Moved #{task.id} to bottom."
     elif target in {"before", "after"}:
         if reference_id is None:
@@ -380,8 +390,26 @@ def reorder_task(
         if reference.state is not task.state:
             result.failure("Error: reference task must be in the same column.")
             return result
+
+        reference_current_index = next(
+            index
+            for index, candidate in enumerate(current_order)
+            if candidate.id == reference.id
+        )
+        if target == "before" and current_index + 1 == reference_current_index:
+            result.failure(f"Error: task #{task.id} is already before #{reference.id}.")
+            return result
+        if target == "after" and reference_current_index + 1 == current_index:
+            result.failure(f"Error: task #{task.id} is already after #{reference.id}.")
+            return result
+
+        ordered_without_task = [
+            candidate for candidate in current_order if candidate.id != task.id
+        ]
         reference_index = next(
-            index for index, candidate in enumerate(ordered) if candidate.id == reference.id
+            index
+            for index, candidate in enumerate(ordered_without_task)
+            if candidate.id == reference.id
         )
         insert_at = reference_index if target == "before" else reference_index + 1
         success_message = f"Moved #{task.id} {target} #{reference.id}."
@@ -389,6 +417,7 @@ def reorder_task(
         result.failure("Error: position must be top, bottom, before, or after.")
         return result
 
+    ordered = [candidate for candidate in current_order if candidate.id != task.id]
     ordered.insert(insert_at, task)
     for position, candidate in enumerate(ordered, start=1):
         candidate.position = position
