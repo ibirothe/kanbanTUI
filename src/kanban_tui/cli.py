@@ -39,7 +39,6 @@ class PrefixGroup(DefaultGroup):
 
 
 def _selected_config_path() -> Path | None:
-    """Return the root --config value for the current command invocation."""
     root_context = click.get_current_context().find_root()
     config_path = root_context.params.get("config_path")
     return config_path if isinstance(config_path, Path) else None
@@ -62,7 +61,12 @@ def _complete_operation(result: OperationResult, config) -> None:
         raise click.exceptions.Exit(1)
 
 
-@click.command(cls=PrefixGroup, default="show", default_if_no_args=True)
+@click.command(
+    name="kanban-tui",
+    cls=PrefixGroup,
+    default="show",
+    default_if_no_args=True,
+)
 @click.version_option(VERSION)
 @click.option(
     "--config",
@@ -71,11 +75,11 @@ def _complete_operation(result: OperationResult, config) -> None:
     default=None,
     help="Use an explicit YAML configuration file.",
 )
-def clikan(config_path):
-    """clikan: CLI personal kanban"""
+def main(config_path):
+    """kanbanTUI: terminal personal Kanban board."""
 
 
-@clikan.command()
+@main.command()
 def configure():
     """Create the selected configuration and default datastore path."""
     explicit_path = _selected_config_path()
@@ -89,7 +93,7 @@ def configure():
     click.echo(f"Creating {created_path}")
 
 
-@clikan.command()
+@main.command()
 @click.argument("task_words", nargs=-1, required=True)
 def add(task_words):
     """Add one task to todo."""
@@ -102,7 +106,7 @@ def add(task_words):
     _complete_operation(result, config)
 
 
-@clikan.command()
+@main.command()
 @click.argument("task_id")
 @click.argument("task_words", nargs=-1, required=True)
 def edit(task_id, task_words):
@@ -116,7 +120,7 @@ def edit(task_id, task_words):
     _complete_operation(result, config)
 
 
-@clikan.command()
+@main.command()
 @click.argument("ids", nargs=-1, required=True)
 def delete(ids):
     """Delete tasks."""
@@ -128,7 +132,7 @@ def delete(ids):
     _complete_operation(result, config)
 
 
-@clikan.command()
+@main.command()
 @click.argument("ids", nargs=-1, required=True)
 def restore(ids):
     """Restore deleted tasks to todo."""
@@ -140,7 +144,7 @@ def restore(ids):
     _complete_operation(result, config)
 
 
-@clikan.command()
+@main.command()
 @click.argument("ids", nargs=-1, required=True)
 def promote(ids):
     """Promote tasks."""
@@ -152,7 +156,7 @@ def promote(ids):
     _complete_operation(result, config)
 
 
-@clikan.command()
+@main.command()
 @click.argument("ids", nargs=-1, required=True)
 def regress(ids):
     """Regress tasks."""
@@ -170,7 +174,7 @@ def display(output_format: str = "table") -> None:
     render_board(config, board, VERSION, output_format)
 
 
-@clikan.command()
+@main.command()
 @click.option(
     "--format",
     "output_format",
@@ -183,7 +187,7 @@ def show(output_format):
     display(output_format.lower())
 
 
-@clikan.command()
+@main.command()
 def history():
     """Show deleted task history."""
     config = _read_config()
