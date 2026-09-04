@@ -1,6 +1,6 @@
-import datetime
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from .models import AppConfig, Board, Task, TaskState
 
@@ -24,8 +24,8 @@ class OperationResult:
         self.messages.append(message)
 
 
-def timestamp() -> str:
-    return "{:%Y-%b-%d %H:%M:%S}".format(datetime.datetime.now())
+def timestamp() -> datetime:
+    return datetime.now().astimezone()
 
 
 def _count_state(board: Board, state: TaskState) -> int:
