@@ -65,7 +65,7 @@ def _remove_lock(lock_path: Path, owner_path: Path) -> bool:
 
 @contextmanager
 def datastore_lock(config: AppConfig):
-    data_path = config.clikan_data.resolve()
+    data_path = config.data_path.resolve()
     lock_path = Path(f"{data_path}.lock")
     owner_path = lock_path / "owner"
 
@@ -78,7 +78,7 @@ def datastore_lock(config: AppConfig):
                 lock_path, owner_path
             ):
                 raise click.ClickException(
-                    f"Datastore {data_path} is locked by another clikan process."
+                    f"Datastore {data_path} is locked by another kanban-tui process."
                 )
             lock_path.mkdir()
     except click.ClickException:
@@ -97,7 +97,7 @@ def datastore_lock(config: AppConfig):
 
 
 def read_data(config: AppConfig, *, initialize_missing: bool = True) -> Board:
-    data_path = config.clikan_data
+    data_path = config.data_path
     try:
         with data_path.open("r", encoding="utf-8") as stream:
             try:
@@ -122,7 +122,7 @@ def read_data(config: AppConfig, *, initialize_missing: bool = True) -> Board:
 
 
 def write_data(config: AppConfig, board: Board) -> None:
-    data_path = config.clikan_data
+    data_path = config.data_path
     raw = board.to_mapping()
     directory = data_path.parent
     temp_path = None
@@ -133,7 +133,7 @@ def write_data(config: AppConfig, board: Board) -> None:
             mode="w",
             encoding="utf-8",
             dir=directory,
-            prefix=".clikan-",
+            prefix=".kanban-tui-",
             suffix=".tmp",
             delete=False,
         ) as outfile:
