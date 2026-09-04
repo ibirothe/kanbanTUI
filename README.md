@@ -39,23 +39,62 @@ Supported settings:
 - `limits.taskname`: maximum task text length; default `40`.
 - `repaint`: display the board after successful mutations; default `false`.
 
-Configuration selection precedence:
+Select a configuration in one of three ways:
 
-1. explicit root option `--config PATH`;
-2. `$KANBAN_TUI_HOME/.kanban-tui.yaml` when `KANBAN_TUI_HOME` is set;
-3. `~/.kanban-tui.yaml`.
+1. `--config PATH` for an explicit YAML file;
+2. `--board NAME` for a named board in `$KANBAN_TUI_HOME/boards/`;
+3. otherwise `$KANBAN_TUI_HOME/.kanban-tui.yaml` or `~/.kanban-tui.yaml` is used.
 
-Use `--config` for independent boards:
+`--config` and `--board` are mutually exclusive.
+
+## Named boards
+
+Create and list named boards:
 
 ```bash
-kanban-tui --config ~/boards/work.yaml configure
-kanban-tui --config ~/boards/work.yaml add Fix production bug
-kanban-tui --config ~/boards/personal.yaml configure
-kanban-tui --config ~/boards/personal.yaml add Buy groceries
-kanban-tui --config ~/boards/work.yaml show
+kanban-tui board create work
+kanban-tui board create personal
+kanban-tui board list
 ```
 
-`configure` honors the selected path and creates a datastore with the same basename and a `.dat` suffix. Relative `data_path` values are always resolved against the selected configuration file.
+Use a named board with any command, including the TUI:
+
+```bash
+kanban-tui --board work add Fix production bug
+kanban-tui --board personal add Buy groceries
+kanban-tui --board work show
+kanban-tui --board work tui
+```
+
+Named board configurations live at `$KANBAN_TUI_HOME/boards/<name>.yaml`, with a matching `.dat` datastore by default. Board names are normalized lowercase slugs containing letters, numbers, `-`, or `_`.
+
+The lower-level explicit config mechanism remains available:
+
+```bash
+kanban-tui --config ~/boards/custom.yaml configure
+kanban-tui --config ~/boards/custom.yaml show
+```
+
+## Configuration commands
+
+Inspect and edit the selected configuration without opening YAML manually:
+
+```bash
+kanban-tui config path
+kanban-tui config show
+kanban-tui config set limits.wip 3
+kanban-tui config set limits.todo unlimited
+kanban-tui config set repaint true
+```
+
+The same commands work with `--board` or `--config`:
+
+```bash
+kanban-tui --board work config set limits.wip 2
+kanban-tui --config ~/boards/custom.yaml config show
+```
+
+Supported `config set` keys are `data_path`, `repaint`, `limits.todo`, `limits.wip`, `limits.done`, and `limits.taskname`. Optional TODO/WIP limits accept `unlimited`. Updates are validated before an atomic config-file replacement and preserve unrelated YAML fields.
 
 ## Interactive TUI
 
