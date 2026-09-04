@@ -1,12 +1,30 @@
+# Local application state
+.clikan.yaml
 .clikan.dat
-build/
-clikan.egg-info/
-clikan.pyc
-setup.pyc
-dist/
+.clikan.dat.lock/
+*.clikan.dat
+*.clikan.dat.lock/
+
+# Python environments and bytecode
+.venv/
 venv/
 venv3/
-.cache/
-.pytest_cache/
 __pycache__/
-.vscode
+*.py[cod]
+*.egg-info/
+
+# Build and test output
+build/
+dist/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
