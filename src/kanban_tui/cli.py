@@ -3,13 +3,15 @@ from click_default_group import DefaultGroup
 
 from . import VERSION
 from .config import create_default_config, get_config_path, read_config
-from .rendering import render_board
+from .rendering import render_board, render_history
 from .services import (
     OperationResult,
     add_tasks,
     delete_tasks,
+    edit_task,
     promote_tasks,
     regress_tasks,
+    restore_tasks,
 )
 from .storage import datastore_lock, read_data, write_data
 
@@ -80,6 +82,20 @@ def add(task_words):
 
 
 @clikan.command()
+@click.argument("task_id")
+@click.argument("task_words", nargs=-1, required=True)
+def edit(task_id, task_words):
+    """Edit the text of an active task."""
+    config = read_config()
+    task_text = " ".join(task_words)
+    with datastore_lock(config):
+        board = read_data(config)
+        result = edit_task(config, board, task_id, task_text)
+        write_data(config, board)
+    _complete_operation(result, config)
+
+
+@clikan.command()
 @click.argument("ids", nargs=-1, required=True)
 def delete(ids):
     """Delete tasks."""
@@ -87,6 +103,18 @@ def delete(ids):
     with datastore_lock(config):
         board = read_data(config)
         result = delete_tasks(board, ids)
+        write_data(config, board)
+    _complete_operation(result, config)
+
+
+@clikan.command()
+@click.argument("ids", nargs=-1, required=True)
+def restore(ids):
+    """Restore deleted tasks to todo."""
+    config = read_config()
+    with datastore_lock(config):
+        board = read_data(config)
+        result = restore_tasks(config, board, ids)
         write_data(config, board)
     _complete_operation(result, config)
 
@@ -125,3 +153,11 @@ def display():
 def show():
     """Show the board."""
     display()
+
+
+@clikan.command()
+def history():
+    """Show deleted task history."""
+    config = read_config()
+    board = read_data(config, initialize_missing=False)
+    render_history(board)
