@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 
 from kanban_tui.cli import main
+from kanban_tui.storage import read_data
 
 
 def test_help_and_version(runner):
@@ -61,6 +62,7 @@ def test_done_completes_task_directly(runner, write_config):
     assert result.exit_code == 0
     assert "Completed #1." in result.output
     assert payload["tasks"][0]["state"] == "done"
+    assert payload["tasks"][0]["completed_at"] is not None
 
 
 def test_legacy_relative_transition_commands_remain_available(runner, write_config):
@@ -245,6 +247,21 @@ def test_move_reorders_tasks_and_persists_across_show(runner, write_config):
     assert [item["id"] for item in payload["tasks"]] == [3, 1, 2]
 
 
+def test_noop_reorder_does_not_replace_previous_undo_snapshot(runner, write_config):
+    config = write_config()
+    runner.invoke(main, ["add", "one"])
+    runner.invoke(main, ["add", "two"])
+
+    result = runner.invoke(main, ["move", "1", "top"])
+
+    assert result.exit_code == 1
+    assert "already at top" in result.output
+
+    undo_result = runner.invoke(main, ["undo"])
+    assert undo_result.exit_code == 0
+    assert list(read_data(config).active) == [1]
+
+
 def test_move_before_requires_reference_id(runner, write_config):
     write_config()
     runner.invoke(main, ["add", "task"])
@@ -279,6 +296,7 @@ def test_show_json_is_machine_readable(runner, write_config):
     assert payload["tasks"][0]["id"] == 1
     assert payload["tasks"][0]["state"] == "todo"
     assert payload["tasks"][0]["text"] == "json task"
+    assert payload["tasks"][0]["completed_at"] is None
     assert created_at.tzinfo is not None
     assert created_at.utcoffset() is not None
 
@@ -290,7 +308,9 @@ def test_show_plain_is_color_free(runner, write_config):
     result = runner.invoke(main, ["show", "--format", "plain"])
 
     assert result.exit_code == 0
-    assert result.output.startswith("id\tstate\ttext\tcreated_at\tmodified_at\tpriority\ttags\n")
+    assert result.output.startswith(
+        "id\tstate\ttext\tcreated_at\tmodified_at\tcompleted_at\tpriority\ttags\n"
+    )
     assert "1\ttodo\tplain task\t" in result.output
     assert "\x1b[" not in result.output
 
