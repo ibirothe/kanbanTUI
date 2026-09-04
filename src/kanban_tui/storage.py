@@ -1,9 +1,8 @@
 import os
 import tempfile
-import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 import click
 import yaml
@@ -11,91 +10,88 @@ import yaml
 from .models import AppConfig, Board
 
 
-LOCK_STALE_SECONDS = 300
 UNDO_KEY = "_undo"
 
 
-def _read_owner_pid(owner_path: Path) -> int | None:
-    try:
-        return int(owner_path.read_text(encoding="utf-8").strip())
-    except (OSError, ValueError):
-        return None
+class _LockUnavailable(Exception):
+    """Raised when another process currently owns the datastore lock."""
 
 
-def _pid_is_running(pid: int) -> bool | None:
-    if os.name != "posix":
-        return None
+def _ensure_lock_byte(lock_file: BinaryIO) -> None:
+    lock_file.seek(0, os.SEEK_END)
+    if lock_file.tell() == 0:
+        lock_file.write(b"\0")
+        lock_file.flush()
+    lock_file.seek(0)
+
+
+def _acquire_file_lock(lock_file: BinaryIO) -> None:
+    lock_file.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        try:
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError as exc:
+            raise _LockUnavailable from exc
+        return
+
+    import fcntl
+
     try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as exc:
+        raise _LockUnavailable from exc
+
+
+def _release_file_lock(lock_file: BinaryIO) -> None:
+    lock_file.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        try:
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+        return
+
+    import fcntl
+
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
     except OSError:
-        return None
-    return True
-
-
-def _lock_is_stale(lock_path: Path, owner_path: Path) -> bool:
-    owner_pid = _read_owner_pid(owner_path)
-    if owner_pid is not None:
-        running = _pid_is_running(owner_pid)
-        if running is not None:
-            return not running
-
-    try:
-        age = time.time() - lock_path.stat().st_mtime
-    except OSError:
-        return False
-    return age >= LOCK_STALE_SECONDS
-
-
-def _remove_lock(lock_path: Path, owner_path: Path) -> bool:
-    try:
-        owner_path.unlink()
-    except FileNotFoundError:
         pass
-    except OSError:
-        return False
-
-    try:
-        lock_path.rmdir()
-    except OSError:
-        return False
-    return True
 
 
 @contextmanager
 def datastore_lock(config: AppConfig):
+    """Hold one OS-backed exclusive writer lock for a datastore transaction."""
     data_path = config.data_path.resolve()
     lock_path = Path(f"{data_path}.lock")
-    owner_path = lock_path / "owner"
+    lock_file: BinaryIO | None = None
 
     try:
         data_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            lock_path.mkdir()
-        except FileExistsError:
-            if not _lock_is_stale(lock_path, owner_path) or not _remove_lock(
-                lock_path, owner_path
-            ):
-                raise click.ClickException(
-                    f"Datastore {data_path} is locked by another kanban-tui process."
-                )
-            lock_path.mkdir()
-    except click.ClickException:
-        raise
+        lock_file = lock_path.open("a+b")
+        _ensure_lock_byte(lock_file)
+        _acquire_file_lock(lock_file)
+    except _LockUnavailable as exc:
+        if lock_file is not None:
+            lock_file.close()
+        raise click.ClickException(
+            f"Datastore {data_path} is locked by another kanban-tui process."
+        ) from exc
     except OSError as exc:
-        raise click.ClickException(f"Could not lock datastore {data_path}: {exc}")
+        if lock_file is not None:
+            lock_file.close()
+        raise click.ClickException(f"Could not lock datastore {data_path}: {exc}") from exc
 
     try:
-        try:
-            owner_path.write_text(str(os.getpid()), encoding="utf-8")
-        except OSError:
-            pass
         yield
     finally:
-        _remove_lock(lock_path, owner_path)
+        assert lock_file is not None
+        _release_file_lock(lock_file)
+        lock_file.close()
 
 
 def _read_raw_data(data_path: Path) -> Any:
