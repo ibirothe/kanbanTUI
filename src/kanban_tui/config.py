@@ -9,11 +9,19 @@ from .models import AppConfig, Limits
 
 def get_clikan_home() -> Path:
     configured_home = os.environ.get("CLIKAN_HOME")
-    return Path(configured_home).expanduser() if configured_home else Path.home()
+    home = Path(configured_home).expanduser() if configured_home else Path.home()
+    return home.resolve()
 
 
 def get_config_path() -> Path:
     return get_clikan_home() / ".clikan.yaml"
+
+
+def _resolve_data_path(clikan_data: str, config_path: Path) -> Path:
+    data_path = Path(clikan_data).expanduser()
+    if data_path.is_absolute():
+        return data_path
+    return (config_path.parent / data_path).resolve()
 
 
 def validate_config(config, config_path: Path) -> AppConfig:
@@ -40,7 +48,7 @@ def validate_config(config, config_path: Path) -> AppConfig:
         )
 
     return AppConfig(
-        clikan_data=Path(clikan_data).expanduser(),
+        clikan_data=_resolve_data_path(clikan_data, config_path),
         limits=limits,
         repaint=repaint,
     )
@@ -69,6 +77,7 @@ def create_default_config() -> Path:
     config_path = home / ".clikan.yaml"
     data_path = home / ".clikan.dat"
     try:
+        home.mkdir(parents=True, exist_ok=True)
         with config_path.open("w", encoding="utf-8") as outfile:
             yaml.safe_dump(
                 {"clikan_data": str(data_path)},
