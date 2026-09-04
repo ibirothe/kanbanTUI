@@ -108,6 +108,23 @@ def test_invalid_timestamp_is_rejected():
         )
 
 
+def test_empty_task_text_is_rejected():
+    with pytest.raises(ValueError, match="text cannot be empty"):
+        Task(1, TaskState.TODO, "   ", STAMP, EARLIER)
+
+
+def test_non_done_task_cannot_have_completion_timestamp():
+    with pytest.raises(ValueError, match="cannot have a completion timestamp"):
+        Task(
+            1,
+            TaskState.TODO,
+            "task",
+            STAMP,
+            EARLIER,
+            completed_at=STAMP,
+        )
+
+
 def test_invalid_position_is_rejected():
     with pytest.raises(ValueError, match="invalid position"):
         Board.from_mapping(
@@ -124,6 +141,46 @@ def test_invalid_position_is_rejected():
                 "deleted": {},
             }
         )
+
+
+def test_fractional_position_is_rejected_instead_of_truncated():
+    with pytest.raises(ValueError, match="invalid position"):
+        Board.from_mapping(
+            {
+                "data": {
+                    1: [
+                        "todo",
+                        "task",
+                        "2026-09-04T10:00:00+00:00",
+                        "2026-09-04T09:00:00+00:00",
+                        1.5,
+                    ]
+                },
+                "deleted": {},
+            }
+        )
+
+
+def test_datastore_task_keys_must_be_positive_integers():
+    with pytest.raises(ValueError, match="active task ids must be positive integers"):
+        Board.from_mapping(
+            {
+                "data": {
+                    "1": [
+                        "todo",
+                        "task",
+                        "2026-09-04T10:00:00+00:00",
+                        "2026-09-04T09:00:00+00:00",
+                    ]
+                },
+                "deleted": {},
+            }
+        )
+
+
+def test_board_key_must_match_task_id():
+    with pytest.raises(ValueError, match="does not match task id"):
+        Board(active={2: Task(1, TaskState.TODO, "task", STAMP, EARLIER)})
 
 
 def test_next_task_id_includes_deleted_history():
