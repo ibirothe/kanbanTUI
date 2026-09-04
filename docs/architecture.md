@@ -5,27 +5,28 @@
 Production code lives under `src/kanban_tui/`.
 
 - `__init__.py` — package version lookup.
-- `cli.py` — Click command definitions, command-prefix handling, and user-facing wiring.
+- `cli.py` — Click command definitions, command-prefix handling, global config selection, and user-facing wiring.
 - `config.py` — config path resolution, YAML parsing, defaults, and validation.
 - `models.py` — typed domain models: `TaskState`, `Task`, `Limits`, `AppConfig`, and `Board`.
 - `services.py` — task creation, deletion, promotion/regression, and board business rules.
 - `storage.py` — datastore locking, YAML deserialization/serialization, and atomic writes.
-- `rendering.py` — Rich table construction and terminal rendering.
+- `rendering.py` — Rich, plain, JSON, and history rendering.
 
-Tests live under `tests/` and mirror these responsibilities where practical. Shared temporary-home/config fixtures live in `tests/conftest.py`.
+Tests live under `tests/` and mirror these responsibilities where practical. Shared temporary-home/config fixtures live in `tests/conftest.py`; explicit multi-board behavior is covered separately in `tests/test_multiboard.py`.
 
 ## Runtime flow
 
 For mutating commands:
 
-1. A Click command in `cli.py` loads `AppConfig` through `config.py`.
-2. An exclusive datastore writer lock is acquired in `storage.py`.
-3. YAML is read and converted into a typed `Board`.
-4. `services.py` applies the requested operation and returns a structured result containing messages plus success/failure counts.
-5. The board is serialized back to the legacy-compatible YAML shape and atomically replaced on disk.
-6. The CLI prints service messages, repaints after successful changes when configured, and returns non-zero if any requested operation failed.
+1. The root Click command selects a configuration path.
+2. `config.py` loads and validates that configuration into `AppConfig`.
+3. An exclusive datastore writer lock is acquired in `storage.py`.
+4. YAML is read and converted into a typed `Board`.
+5. `services.py` applies the requested operation and returns a structured result containing messages plus success/failure counts.
+6. The board is serialized back to the YAML persistence shape and atomically replaced on disk.
+7. The CLI prints service messages, repaints after successful changes when configured, and returns non-zero if any requested operation failed.
 
-`show` is read-only and does not acquire the writer lock. Atomic datastore replacement means readers observe either the previous complete file or the new complete file. Showing a board whose datastore does not yet exist returns an empty board without creating a file; the first mutating command initializes persistence.
+`show` and `history` are read-only and do not acquire the writer lock. Atomic datastore replacement means readers observe either the previous complete file or the new complete file. Showing a board whose datastore does not yet exist returns an empty board without creating a file; the first mutating command initializes persistence.
 
 ## Task states and limits
 
@@ -42,11 +43,24 @@ Capacity limits are invariants on entry into a constrained state: every transiti
 
 Task IDs are unique across both active and deleted history. New IDs are allocated above the highest ID present in either collection, so deleted IDs are never reused.
 
-## Configuration
+## Configuration and board selection
 
-Configuration is read from `.clikan.yaml` under `CLIKAN_HOME`, falling back to the user's home directory.
+Configuration selection is deterministic and has one precedence order:
 
-Supported values:
+1. explicit root option `--config PATH`;
+2. `$CLIKAN_HOME/.clikan.yaml` when `CLIKAN_HOME` is set;
+3. `~/.clikan.yaml`.
+
+The root option applies to every subcommand, including `configure`, `show`, mutations, and `history`. This allows multiple independent boards without mutating environment variables:
+
+```text
+clikan --config ~/boards/work.yaml show
+clikan --config ~/boards/personal.yaml add Buy groceries
+```
+
+`clikan --config PATH configure` creates the selected configuration path and uses the same basename with `.dat` as its default datastore. For example, `/home/user/boards/work.yaml` defaults to `/home/user/boards/work.dat`.
+
+Supported configuration values:
 
 - `clikan_data`: datastore path.
 - `limits.todo`: optional TODO capacity.
@@ -59,9 +73,9 @@ Supported values:
 
 - absolute paths are used as supplied;
 - `~` is expanded using the user's home directory;
-- relative paths are resolved relative to the directory containing `.clikan.yaml`, never relative to the shell's current working directory.
+- relative paths are resolved relative to the directory containing the selected configuration file, never relative to the shell's current working directory.
 
-`clikan configure` creates a missing `CLIKAN_HOME` directory when necessary and writes a minimal default configuration. An example lives at `examples/clikan.yaml`. Missing datastore parent directories are created when a writer first initializes the board.
+Default `clikan configure` creates a missing `CLIKAN_HOME` directory when necessary and writes a minimal configuration. An example lives at `examples/clikan.yaml`. Missing datastore parent directories are created when a writer first initializes the board.
 
 ## Datastore format and timestamps
 
@@ -91,7 +105,7 @@ Mutating commands use a sibling `<datastore>.lock` directory as an inter-process
 
 On POSIX systems, an existing lock whose recorded owner PID no longer exists is considered stale and recovered. When live-PID detection is unavailable or owner metadata is missing, a lock older than five minutes is treated as stale. A live writer lock still prevents another writer from entering the read-modify-write transaction.
 
-Normal and exceptional command completion removes the writer lock. Read-only `show` does not take this exclusive lock.
+Normal and exceptional command completion removes the writer lock. Read-only commands do not take this exclusive lock.
 
 Writes use a temporary file in the datastore directory, flush and `fsync` the contents, then replace the datastore with `os.replace()`. This keeps replacement atomic on the same filesystem and preserves the previous valid file if writing the temporary file fails.
 
