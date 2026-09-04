@@ -76,23 +76,17 @@ $ `clikan configure`
 
 ## Development
 
-It's Python code.  Fork, fix, and submit a PR - it'd be super appreciated.
-
-Tests?  Um, yeah.
+This fork is maintained as a solo-development project. Changes can be committed directly to the active development branch; no contribution or review workflow is required.
 
 ### Testing
 
-Updated test suite to include 3.6-3.9 on Windows, macOS and Ubuntu.
-
-***Definitely*** need some help here.  There is a basic test suite available in `clikan_test.py`.
-
-Run it with:
+Run the complete test suite with:
 
 ```
-pytest clikan_test.py
+pytest
 ```
 
-The test suite automatically assigns a temporary `CLIKAN_HOME` to every test. Each test creates its own configuration and datastore, so running the suite does not read or modify your real `~/.clikan.yaml` or Kanban data.
+The test suite automatically assigns a temporary `CLIKAN_HOME` to every command-behavior test. Tests create isolated configuration and datastore files, so running the suite does not read or modify your real `~/.clikan.yaml` or Kanban data.
 
 Am considering adding the `--config_file` feature to allow for specifying the path to the config file as well.  If this is something you're interesting in or believe would be beneficial let me know through an Github issue.
 ## License
@@ -112,6 +106,4 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ## Support
 
 Github Issues
-https://github.com/kitplummer/clikan/issues
-
-Feel free to use issues as a forum-like thing too, ask questions or post comments.
+https://github.com/ibirothe/kanbanTUI/issues
