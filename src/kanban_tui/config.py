@@ -7,8 +7,8 @@ import yaml
 from .models import AppConfig, Limits
 
 
-def get_clikan_home() -> Path:
-    configured_home = os.environ.get("CLIKAN_HOME")
+def get_app_home() -> Path:
+    configured_home = os.environ.get("KANBAN_TUI_HOME")
     home = Path(configured_home).expanduser() if configured_home else Path.home()
     return home.resolve()
 
@@ -16,11 +16,11 @@ def get_clikan_home() -> Path:
 def get_config_path(explicit_path: Path | None = None) -> Path:
     if explicit_path is not None:
         return explicit_path.expanduser().resolve()
-    return get_clikan_home() / ".clikan.yaml"
+    return get_app_home() / ".kanban-tui.yaml"
 
 
-def _resolve_data_path(clikan_data: str, config_path: Path) -> Path:
-    data_path = Path(clikan_data).expanduser()
+def _resolve_data_path(raw_path: str, config_path: Path) -> Path:
+    data_path = Path(raw_path).expanduser()
     if data_path.is_absolute():
         return data_path
     return (config_path.parent / data_path).resolve()
@@ -32,10 +32,10 @@ def validate_config(config, config_path: Path) -> AppConfig:
             f"Config file {config_path} must contain a YAML mapping."
         )
 
-    clikan_data = config.get("clikan_data")
-    if not isinstance(clikan_data, str) or not clikan_data.strip():
+    raw_data_path = config.get("data_path")
+    if not isinstance(raw_data_path, str) or not raw_data_path.strip():
         raise click.ClickException(
-            f"Config file {config_path} must define a non-empty clikan_data path."
+            f"Config file {config_path} must define a non-empty data_path."
         )
 
     try:
@@ -50,7 +50,7 @@ def validate_config(config, config_path: Path) -> AppConfig:
         )
 
     return AppConfig(
-        clikan_data=_resolve_data_path(clikan_data, config_path),
+        data_path=_resolve_data_path(raw_data_path, config_path),
         limits=limits,
         repaint=repaint,
     )
@@ -81,7 +81,7 @@ def create_default_config(explicit_path: Path | None = None) -> Path:
         config_path.parent.mkdir(parents=True, exist_ok=True)
         with config_path.open("w", encoding="utf-8") as outfile:
             yaml.safe_dump(
-                {"clikan_data": str(data_path)},
+                {"data_path": str(data_path)},
                 outfile,
                 default_flow_style=False,
             )
