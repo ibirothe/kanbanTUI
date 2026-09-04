@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from kanban_tui.cli import clikan
 
 
@@ -123,3 +125,15 @@ def test_mixed_batch_returns_failure_if_any_item_fails(runner, write_config):
     assert result.exit_code == 1
     assert "Promoting task 1 to in-progress." in result.output
     assert "Can not promote, in-progress limit of 1 reached." in result.output
+
+
+def test_show_reads_existing_data_without_writer_lock(runner, write_config):
+    config = write_config()
+    runner.invoke(clikan, ["add", "task"])
+    lock_path = Path(f"{config.clikan_data}.lock")
+    lock_path.mkdir()
+
+    result = runner.invoke(clikan, ["show"])
+
+    assert result.exit_code == 0
+    assert "task" in result.output
