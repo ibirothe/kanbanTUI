@@ -111,6 +111,23 @@ async def test_tui_capacity_rejection_keeps_focus_and_state(write_config):
         assert app._selected_task().id == 2
 
 
+async def test_tui_invalid_restore_id_is_reported_without_crashing(write_config):
+    config = write_config()
+    seed_board(config, "task")
+    app = KanbanApp(config)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await app._restore_prompt_result("not-an-id")
+        await pilot.pause()
+
+        assert app.board.active[1].text == "task"
+        assert app._selected_task().id == 1
+
+    persisted = read_data(config, initialize_missing=False)
+    assert persisted.active[1].text == "task"
+
+
 async def test_tui_undo_shortcut_restores_previous_board(write_config):
     config = write_config()
     seed_board(config, "task")
