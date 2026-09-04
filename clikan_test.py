@@ -38,6 +38,12 @@ def add_tasks(runner, *tasks):
     return result
 
 
+def read_board(home):
+    return yaml.safe_load(
+        (home / ".clikan.dat").read_text(encoding="utf-8")
+    )
+
+
 # Configure tests
 
 
@@ -266,6 +272,39 @@ def test_command_promote_multi(isolated_clikan_home):
     assert result.exit_code == 0
     assert "Promoting task 2 to done." in result.output
     assert "Promoting task 3 to in-progress." in result.output
+
+
+def test_command_promote_multi_respects_wip_limit(isolated_clikan_home):
+    write_config(isolated_clikan_home, limits={"wip": 1})
+    runner = CliRunner()
+    add_tasks(runner, "task 1", "task 2")
+
+    result = runner.invoke(clikan, ["promote", "1", "2"])
+    board = read_board(isolated_clikan_home)
+
+    assert result.exit_code == 0
+    assert "Promoting task 1 to in-progress." in result.output
+    assert "Can not promote, in-progress limit of 1 reached." in result.output
+    assert board["data"][1][0] == "inprogress"
+    assert board["data"][2][0] == "todo"
+
+
+def test_command_regress_respects_wip_limit(isolated_clikan_home):
+    write_config(isolated_clikan_home, limits={"wip": 1})
+    runner = CliRunner()
+    add_tasks(runner, "active task", "done task")
+
+    assert runner.invoke(clikan, ["promote", "2"]).exit_code == 0
+    assert runner.invoke(clikan, ["promote", "2"]).exit_code == 0
+    assert runner.invoke(clikan, ["promote", "1"]).exit_code == 0
+
+    result = runner.invoke(clikan, ["regress", "2"])
+    board = read_board(isolated_clikan_home)
+
+    assert result.exit_code == 0
+    assert "Can not regress, in-progress limit of 1 reached." in result.output
+    assert board["data"][1][0] == "inprogress"
+    assert board["data"][2][0] == "done"
 
 
 def test_command_delete_multi(isolated_clikan_home):
