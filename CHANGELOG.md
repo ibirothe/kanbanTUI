@@ -1,36 +1,36 @@
 # Changelog
 
-## 0.5.0 - 2026-09-04
+## 0.5.0
 
-First Pascal-maintained kanbanTUI baseline after the repository modernization.
+Current maintained kanbanTUI baseline.
 
-### Added
+### Architecture
 
-- `src/kanban_tui/` package layout with separated CLI, config, models, services, storage, and rendering modules.
-- Typed `Task`, `TaskState`, `Limits`, `AppConfig`, and `Board` domain models.
-- `edit`, `history`, and `restore` commands.
-- Global `--config PATH` support for multiple independent boards.
-- `show --format table|plain|json` output modes.
-- Local Ruff, mypy, and pytest-cov tooling.
-- Timezone-aware ISO 8601 timestamps.
-- Stale datastore lock recovery and lock-free read-only display.
-- `kanban-tui` command, `KANBAN_TUI_HOME`, and `.kanban-tui.yaml` configuration identity.
+- moved production code into `src/kanban_tui/` with separated CLI, configuration, models, services, storage, rendering, transfer, and TUI modules;
+- moved tests into `tests/` with isolated temporary board state;
+- centralized project/tool configuration in `pyproject.toml`;
+- added typed task/config/board domain models while retaining backward-compatible YAML reads;
+- added atomic datastore/config replacement and stale writer-lock recovery.
 
-### Changed
+### UX
 
-- Maintainer metadata identifies Pascal Rothe <ibirothe@gmail.com>.
-- Python support is Python 3.11+.
-- Normal `add` input treats unquoted words as one task description.
-- Rejected task operations return non-zero exit codes.
-- Relative datastore paths resolve against their selected configuration file.
-- Completed tasks are ordered by most recent modification time.
-- Tests are isolated under `tests/` and do not depend on user state.
+- added the full-screen Textual TUI with keyboard navigation, task editing, state movement, ordering, search, archive/restore, and undo;
+- added persistent manual ordering for TODO and IN PROGRESS tasks;
+- added explicit `start`, `done`, and `todo` state commands;
+- added improved capacity-aware table rendering, search/state filters, and deterministic view sorting;
+- added named boards with `--board`, `board create`, and `board list`;
+- added `config path`, `config show`, and validated `config set` commands;
+- standardized concise task-centric command feedback.
 
-### Fixed
+### Data safety and portability
 
-- Startup version lookup.
-- Regression command argument and invalid-ID handling.
-- WIP and TODO capacity invariant violations.
-- Task-ID reuse across deleted history.
-- Non-atomic datastore writes and stale writer locks.
-- Missing/invalid configuration and datastore validation.
+- task IDs remain unique across active and archived history;
+- TODO/WIP invariants are enforced on all relevant transitions;
+- timestamps are timezone-aware ISO 8601 on new writes;
+- added complete versioned JSON board export/import with merge and replace modes;
+- added one-level atomic undo for successful mutations, including imports;
+- deleted history can be inspected and restored.
+
+### Maintainer
+
+Pascal Rothe <ibirothe@gmail.com>
