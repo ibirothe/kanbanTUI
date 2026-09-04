@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from pathlib import Path
 
 from kanban_tui.cli import clikan
@@ -202,12 +203,14 @@ def test_show_json_is_machine_readable(runner, write_config):
 
     result = runner.invoke(clikan, ["show", "--format", "json"])
     payload = json.loads(result.output)
+    created_at = datetime.fromisoformat(payload["tasks"][0]["created_at"])
 
     assert result.exit_code == 0
     assert payload["tasks"][0]["id"] == 1
     assert payload["tasks"][0]["state"] == "todo"
     assert payload["tasks"][0]["text"] == "json task"
-    assert payload["tasks"][0]["created_at"].endswith(("+00:00", "+01:00", "+02:00"))
+    assert created_at.tzinfo is not None
+    assert created_at.utcoffset() is not None
 
 
 def test_show_plain_is_color_free(runner, write_config):
