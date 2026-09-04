@@ -144,6 +144,17 @@ def board_from_export(payload: Any) -> Board:
     return board
 
 
+def validate_imported_tasks(config: AppConfig, imported: Board) -> None:
+    """Validate config-dependent constraints for tasks coming from an export."""
+    for task in [*imported.active.values(), *imported.deleted.values()]:
+        if len(task.text) > config.limits.taskname:
+            raise click.ClickException(
+                "Imported task "
+                f"#{task.id} text exceeds limit "
+                f"({len(task.text)}/{config.limits.taskname} characters)."
+            )
+
+
 def validate_board_capacity(config: AppConfig, board: Board) -> None:
     for state, limit, label in (
         (TaskState.TODO, config.limits.todo, "TODO"),
