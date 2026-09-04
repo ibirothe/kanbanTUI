@@ -1,3 +1,4 @@
+import click
 import pytest
 import yaml
 
@@ -10,13 +11,13 @@ def test_config_defaults_are_normalized(tmp_path):
         tmp_path / ".clikan.yaml",
     )
 
-    assert config["limits"]["taskname"] == 40
-    assert config["limits"]["done"] == 10
-    assert config["repaint"] is False
+    assert config.limits.taskname == 40
+    assert config.limits.done == 10
+    assert config.repaint is False
 
 
 def test_invalid_limit_is_rejected(tmp_path):
-    with pytest.raises(Exception, match="non-negative integer"):
+    with pytest.raises(click.ClickException, match="non-negative integer"):
         validate_config(
             {
                 "clikan_data": str(tmp_path / ".clikan.dat"),
@@ -49,4 +50,4 @@ def test_read_config_parses_yaml(isolated_clikan_home):
 
     config = read_config()
 
-    assert config["limits"]["wip"] == 2
+    assert config.limits.wip == 2
