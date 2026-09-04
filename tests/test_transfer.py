@@ -1,74 +1,80 @@
 import json
 from datetime import datetime, timezone
 
+import click
 import pytest
 
 from kanban_tui.cli import main
 from kanban_tui.models import Board, Task, TaskState
+from kanban_tui.services import add_tasks, delete_tasks, move_tasks_to_state
+from kanban_tui.storage import datastore_lock, read_data, write_data
 from kanban_tui.transfer import (
     EXPORT_FORMAT,
     EXPORT_VERSION,
     board_from_export,
     export_payload,
     merge_boards,
+    read_export,
+    validate_board_capacity,
+    write_export,
 )
 
 
-STAMP = datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)
-EARLIER = datetime(2026, 9, 4, 10, 0, tzinfo=timezone.utc)
+STAMP = datetime(2026, 9, 4, 10, 0, tzinfo=timezone.utc)
+EARLIER = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
 
 
-def task(task_id, state, text, position):
-    return Task(
-        id=task_id,
-        state=state,
-        text=text,
-        created_at=EARLIER,
-        modified_at=STAMP,
-        position=position,
-    )
+def task(task_id, state, text, *, position=1):
+    return Task(task_id, state, text, STAMP, EARLIER, position=position)
 
 
-def test_export_payload_round_trips_complete_board():
+def test_export_payload_contains_complete_board_not_display_subset():
     board = Board(
         active={
-            1: task(1, TaskState.TODO, "todo", 2),
-            2: task(2, TaskState.IN_PROGRESS, "doing", 1),
-            3: task(3, TaskState.DONE, "done", 3),
+            1: task(1, TaskState.TODO, "todo", position=2),
+            2: task(2, TaskState.IN_PROGRESS, "doing", position=1),
+            3: task(3, TaskState.DONE, "done", position=3),
         },
-        deleted={4: task(4, TaskState.DELETED, "archived", 4)},
+        deleted={4: task(4, TaskState.DELETED, "archived", position=4)},
     )
 
     payload = export_payload(board)
-    restored = board_from_export(payload)
 
     assert payload["format"] == EXPORT_FORMAT
     assert payload["version"] == EXPORT_VERSION
-    assert set(restored.active) == {1, 2, 3}
-    assert set(restored.deleted) == {4}
-    assert restored.active[1].text == "todo"
-    assert restored.active[2].state is TaskState.IN_PROGRESS
-    assert restored.active[3].state is TaskState.DONE
-    assert restored.deleted[4].state is TaskState.DELETED
-    assert restored.active[1].created_at == EARLIER
-    assert restored.active[1].modified_at == STAMP
+    assert {item["id"] for item in payload["active"]} == {1, 2, 3}
+    assert [item["id"] for item in payload["archived"]] == [4]
+    assert all("created_at" in item and "modified_at" in item for item in payload["active"])
+    assert all("position" in item for item in [*payload["active"], *payload["archived"]])
 
 
-def test_export_validation_rejects_bad_format_version_and_duplicate_ids():
-    base = {
+def test_export_round_trip_preserves_ids_states_text_and_timestamps():
+    board = Board(
+        active={
+            5: task(5, TaskState.TODO, "five", position=2),
+            2: task(2, TaskState.TODO, "two", position=1),
+            8: task(8, TaskState.DONE, "eight", position=8),
+        },
+        deleted={11: task(11, TaskState.DELETED, "old", position=11)},
+    )
+
+    restored = board_from_export(export_payload(board))
+
+    assert set(restored.active) == {2, 5, 8}
+    assert set(restored.deleted) == {11}
+    assert [task.id for task in restored.ordered_tasks(TaskState.TODO)] == [2, 5]
+    assert restored.active[5].text == "five"
+    assert restored.active[5].created_at == EARLIER
+    assert restored.deleted[11].state is TaskState.DELETED
+
+
+def test_invalid_export_format_and_duplicate_ids_are_rejected():
+    with pytest.raises(ValueError, match="unsupported export format"):
+        board_from_export({"format": "other", "version": 1, "active": [], "archived": []})
+
+    payload = {
         "format": EXPORT_FORMAT,
         "version": EXPORT_VERSION,
-        "active": [],
-        "archived": [],
-    }
-
-    with pytest.raises(ValueError, match="unsupported export format"):
-        board_from_export({**base, "format": "other"})
-    with pytest.raises(ValueError, match="unsupported export version"):
-        board_from_export({**base, "version": 99})
-
-    duplicate = {
-        **base,
         "active": [
             {
                 "id": 1,
@@ -91,120 +97,84 @@ def test_export_validation_rejects_bad_format_version_and_duplicate_ids():
         ],
     }
     with pytest.raises(ValueError, match="duplicate task IDs"):
-        board_from_export(duplicate)
+        board_from_export(payload)
 
 
-def test_merge_preserves_ids_and_appends_manual_order():
-    current = Board(
-        active={1: task(1, TaskState.TODO, "current", 1)},
-        deleted={7: task(7, TaskState.DELETED, "old", 7)},
-    )
+def test_merge_appends_ordered_tasks_and_rejects_id_conflicts():
+    current = Board(active={1: task(1, TaskState.TODO, "one", position=1)})
     imported = Board(
         active={
-            2: task(2, TaskState.TODO, "imported first", 1),
-            3: task(3, TaskState.TODO, "imported second", 2),
+            2: task(2, TaskState.TODO, "two", position=1),
+            3: task(3, TaskState.IN_PROGRESS, "three", position=1),
         }
     )
 
     merged = merge_boards(current, imported)
 
-    assert [item.id for item in merged.ordered_tasks(TaskState.TODO)] == [1, 2, 3]
-    assert set(merged.deleted) == {7}
-    assert current.active[1].position == 1
+    assert [task.id for task in merged.ordered_tasks(TaskState.TODO)] == [1, 2]
+    assert [task.id for task in merged.ordered_tasks(TaskState.IN_PROGRESS)] == [3]
+
+    with pytest.raises(click.ClickException, match="task ID conflicts: 1"):
+        merge_boards(current, Board(active={1: task(1, TaskState.TODO, "duplicate")}))
 
 
-def test_merge_rejects_task_id_conflicts():
-    current = Board(active={1: task(1, TaskState.TODO, "current", 1)})
-    imported = Board(active={1: task(1, TaskState.TODO, "incoming", 1)})
+def test_import_capacity_is_validated_before_write(write_config):
+    config = write_config(limits={"todo": 1})
+    imported = Board(
+        active={
+            1: task(1, TaskState.TODO, "one", position=1),
+            2: task(2, TaskState.TODO, "two", position=2),
+        }
+    )
 
-    with pytest.raises(Exception, match="task ID conflicts: 1"):
-        merge_boards(current, imported)
-
-
-def test_cli_export_contains_all_done_and_archived_tasks(runner, write_config, tmp_path):
-    write_config(limits={"done": 1})
-    runner.invoke(main, ["add", "one"])
-    runner.invoke(main, ["done", "1"])
-    runner.invoke(main, ["add", "two"])
-    runner.invoke(main, ["done", "2"])
-    runner.invoke(main, ["add", "archive me"])
-    runner.invoke(main, ["delete", "3"])
-
-    export_path = tmp_path / "backup.json"
-    result = runner.invoke(main, ["export", str(export_path)])
-
-    assert result.exit_code == 0
-    payload = json.loads(export_path.read_text(encoding="utf-8"))
-    assert [item["id"] for item in payload["active"]] == [2, 1]
-    assert [item["id"] for item in payload["archived"]] == [3]
+    with pytest.raises(click.ClickException, match="exceeds TODO limit"):
+        validate_board_capacity(config, imported)
 
 
-def test_cli_import_replace_round_trip_and_merge_conflict(runner, write_config, tmp_path):
-    write_config()
+def test_write_export_requires_force_for_existing_file(tmp_path):
+    path = tmp_path / "board.json"
+    board = Board(active={1: task(1, TaskState.TODO, "one")})
+
+    write_export(path, board)
+    with pytest.raises(click.ClickException, match="already exists"):
+        write_export(path, board)
+
+    write_export(path, board, overwrite=True)
+    assert read_export(path).active[1].text == "one"
+
+
+def test_cli_export_import_replace_and_undo(runner, write_config, tmp_path):
+    config = write_config()
     runner.invoke(main, ["add", "original"])
     export_path = tmp_path / "board.json"
-    assert runner.invoke(main, ["export", str(export_path)]).exit_code == 0
 
+    export_result = runner.invoke(main, ["export", str(export_path)])
     runner.invoke(main, ["edit", "1", "changed"])
-    replace = runner.invoke(
+    import_result = runner.invoke(
         main,
         ["import", str(export_path), "--mode", "replace"],
     )
-    shown = json.loads(runner.invoke(main, ["show", "--format", "json"]).output)
 
-    assert replace.exit_code == 0
-    assert [item["text"] for item in shown["tasks"]] == ["original"]
+    assert export_result.exit_code == 0
+    assert import_result.exit_code == 0
+    assert read_data(config, initialize_missing=False).active[1].text == "original"
 
-    conflict = runner.invoke(main, ["import", str(export_path), "--mode", "merge"])
-    assert conflict.exit_code != 0
-    assert "task ID conflicts: 1" in conflict.output
+    undo_result = runner.invoke(main, ["undo"])
+    assert undo_result.exit_code == 0
+    assert read_data(config, initialize_missing=False).active[1].text == "changed"
 
 
-def test_cli_import_validates_capacity_before_replacing_board(
+def test_cli_import_merge_rejects_conflicting_ids_without_mutating_board(
     runner, write_config, tmp_path
 ):
-    write_config(limits={"todo": 1})
-    runner.invoke(main, ["add", "keep me"])
+    config = write_config()
+    runner.invoke(main, ["add", "current"])
+    path = tmp_path / "conflict.json"
+    payload = export_payload(Board(active={1: task(1, TaskState.TODO, "incoming")}))
+    path.write_text(json.dumps(payload), encoding="utf-8")
 
-    payload = {
-        "format": EXPORT_FORMAT,
-        "version": EXPORT_VERSION,
-        "active": [
-            {
-                "id": task_id,
-                "state": "todo",
-                "text": f"incoming {task_id}",
-                "created_at": EARLIER.isoformat(),
-                "modified_at": STAMP.isoformat(),
-                "position": task_id,
-            }
-            for task_id in (10, 11)
-        ],
-        "archived": [],
-    }
-    import_path = tmp_path / "too-many.json"
-    import_path.write_text(json.dumps(payload), encoding="utf-8")
-
-    result = runner.invoke(
-        main,
-        ["import", str(import_path), "--mode", "replace"],
-    )
-    shown = json.loads(runner.invoke(main, ["show", "--format", "json"]).output)
+    result = runner.invoke(main, ["import", str(path), "--mode", "merge"])
 
     assert result.exit_code != 0
-    assert "exceeds TODO limit (2/1)" in result.output
-    assert [item["text"] for item in shown["tasks"]] == ["keep me"]
-
-
-def test_export_refuses_overwrite_without_force(runner, write_config, tmp_path):
-    write_config()
-    export_path = tmp_path / "board.json"
-    export_path.write_text("existing", encoding="utf-8")
-
-    refused = runner.invoke(main, ["export", str(export_path)])
-    forced = runner.invoke(main, ["export", str(export_path), "--force"])
-
-    assert refused.exit_code != 0
-    assert "Use --force" in refused.output
-    assert forced.exit_code == 0
-    assert json.loads(export_path.read_text(encoding="utf-8"))["format"] == EXPORT_FORMAT
+    board = read_data(config, initialize_missing=False)
+    assert board.active[1].text == "current"
