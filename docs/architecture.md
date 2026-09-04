@@ -36,7 +36,7 @@ For mutating commands:
 - `done`
 - `deleted`
 
-Normal progression is `todo -> inprogress -> done`. Regression moves in the opposite direction. Deletion moves a task from the active collection to the deleted collection.
+Normal progression is `todo -> inprogress -> done`. Regression moves in the opposite direction. Deletion moves a task from the active collection to the deleted collection. `restore` moves a deleted task back to TODO while preserving its ID and creation timestamp.
 
 Capacity limits are invariants on entry into a constrained state: every transition into `inprogress` enforces `limits.wip`, and every transition into `todo` enforces `limits.todo` when configured.
 
@@ -63,23 +63,27 @@ Supported values:
 
 `clikan configure` creates a missing `CLIKAN_HOME` directory when necessary and writes a minimal default configuration. An example lives at `examples/clikan.yaml`. Missing datastore parent directories are created when a writer first initializes the board.
 
-## Datastore format
+## Datastore format and timestamps
 
-The public on-disk format remains YAML-compatible with the original list representation so existing `.clikan.dat` files do not require migration.
+The public on-disk structure remains YAML-compatible with the original list representation so existing `.clikan.dat` files do not require a manual migration.
 
-Example:
+New writes use timezone-aware ISO 8601 timestamps:
 
 ```yaml
 data:
   1:
     - todo
     - Example task
-    - 2026-Sep-04 10:00:00
-    - 2026-Sep-04 10:00:00
+    - '2026-09-04T10:00:00+02:00'
+    - '2026-09-04T09:00:00+02:00'
 deleted: {}
 ```
 
-The storage layer converts this representation into `Task` and `Board` objects immediately after reading. Business logic does not depend on positional list indexes.
+The model boundary also accepts the legacy timestamp form such as `2026-Sep-04 10:00:00`. Legacy naive timestamps are interpreted in the machine's local timezone for that date and normalized to timezone-aware `datetime` values inside the domain model. The next write serializes them as ISO 8601.
+
+`created_at` is the original task creation time. `modified_at` is the time of the most recent edit or state transition. DONE tasks are ordered by `modified_at` descending, so `limits.done` selects the most recently completed tasks rather than relying on task-ID or dictionary order.
+
+The storage layer converts the YAML representation into `Task` and `Board` objects immediately after reading. Business logic does not depend on positional list indexes or opaque timestamp strings.
 
 ## Persistence and locking
 
