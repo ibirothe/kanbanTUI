@@ -143,16 +143,23 @@ def regress(ids):
     _complete_operation(result, config)
 
 
-def display():
+def display(output_format: str = "table") -> None:
     config = read_config()
     board = read_data(config, initialize_missing=False)
-    render_board(config, board, VERSION)
+    render_board(config, board, VERSION, output_format)
 
 
 @clikan.command()
-def show():
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["table", "plain", "json"], case_sensitive=False),
+    default="table",
+    show_default=True,
+)
+def show(output_format):
     """Show the board."""
-    display()
+    display(output_format.lower())
 
 
 @clikan.command()
