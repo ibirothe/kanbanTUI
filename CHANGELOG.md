@@ -9,8 +9,8 @@ Current maintained kanbanTUI baseline.
 - moved production code into `src/kanban_tui/` with separated CLI, configuration, models, services, storage, rendering, transfer, and TUI modules;
 - moved tests into `tests/` with isolated temporary board state;
 - centralized project/tool configuration in `pyproject.toml`;
-- added typed task/config/board domain models while retaining backward-compatible YAML reads;
-- added atomic datastore/config replacement and stale writer-lock recovery.
+- added typed task/config/board domain models while retaining backward-compatible valid YAML reads;
+- added atomic datastore/config replacement.
 
 ### UX
 
@@ -29,9 +29,9 @@ Current maintained kanbanTUI baseline.
 - TODO/WIP invariants are enforced on all relevant transitions;
 - timestamps are timezone-aware ISO 8601 on new writes;
 - optional metadata is stored in a backward-compatible sixth task-record field;
-- complete JSON transfers preserve priority and tags while remaining compatible with metadata-free version-1 exports;
+- complete JSON transfers preserve metadata and completion time;
 - added complete versioned JSON board export/import with merge and replace modes;
-- added one-level atomic undo for successful mutations, including imports and metadata edits;
+- added one-level atomic undo for successful semantic mutations;
 - archived history can be inspected and restored with metadata preserved.
 
 ### Stabilization
@@ -39,12 +39,22 @@ Current maintained kanbanTUI baseline.
 - made datastore reads side-effect free: missing boards remain absent until a mutation actually succeeds;
 - added explicit `completed_at` semantics so DONE ordering reflects completion time rather than later text or metadata edits;
 - retained backward compatibility by deriving `completed_at` from `modified_at` for legacy DONE records;
-- added `completed_at` to structured view output and complete transfer data;
-- changed merge import to deterministically remap imported IDs that collide with existing active or archived history instead of rejecting the merge;
-- preserved non-conflicting imported IDs and report remapped IDs to the user;
+- changed merge import to deterministically remap imported IDs that collide with existing active or archived history;
 - made already-satisfied reorder requests and imports with no effective changes true semantic no-ops;
-- semantic no-ops no longer update timestamps, write the datastore, or consume the single undo snapshot;
-- added regression coverage for first-use persistence, completion ordering, transfer ID remapping, and undo preservation across no-op operations.
+- semantic no-ops no longer update timestamps, write the datastore, or consume the single undo snapshot.
+
+### Production hardening
+
+- replaced PID/age stale-lock heuristics with OS-backed advisory writer locks using `fcntl.flock` on POSIX and `msvcrt.locking` on Windows;
+- tightened task and board invariants: non-empty text, positive integer IDs/positions, consistent active/deleted buckets, matching mapping keys and task IDs, and valid completion-state semantics;
+- stopped fractional numeric values from being silently truncated in persisted positions and configuration limits;
+- validate imported task text against the selected board's configured task-name limit before mutation;
+- reject configurations whose datastore path resolves to the configuration file itself;
+- prevent export, including `--force`, from targeting the selected config, datastore, or lock file;
+- route invalid TUI restore IDs through shared service validation rather than allowing callback conversion failures;
+- reject non-positive task IDs consistently as invalid user input;
+- reserve `default` as the implicit default board name to avoid named-board ambiguity;
+- added focused regression coverage for cross-process lock lifecycle, schema constraints, import limits, internal path protection, TUI restore input, task-ID validation, and reserved board naming.
 
 ### Maintainer
 
