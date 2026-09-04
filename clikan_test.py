@@ -183,6 +183,34 @@ def test_command_delete(isolated_clikan_home):
     assert "No existing task with that id: 1" in result.output
 
 
+def test_command_regress(isolated_clikan_home):
+    write_config(isolated_clikan_home)
+    runner = CliRunner()
+    add_tasks(runner, "regress task")
+    assert runner.invoke(clikan, ["promote", "1"]).exit_code == 0
+    assert runner.invoke(clikan, ["promote", "1"]).exit_code == 0
+
+    result = runner.invoke(clikan, ["regress", "1"])
+    assert result.exit_code == 0
+    assert "Regressing task 1 to in-progress." in result.output
+
+    result = runner.invoke(clikan, ["regress", "1"])
+    assert result.exit_code == 0
+    assert "Regressing task 1 to todo." in result.output
+
+
+def test_command_regress_invalid_ids(isolated_clikan_home):
+    write_config(isolated_clikan_home)
+    runner = CliRunner()
+    add_tasks(runner, "todo task")
+
+    result = runner.invoke(clikan, ["regress", "not-an-id", "1"])
+
+    assert result.exit_code == 0
+    assert "Invalid task id" in result.output
+    assert "Already in todo, can not regress 1" in result.output
+
+
 # Multiple argument tests
 
 
@@ -274,27 +302,6 @@ def test_command_show_multi_after_delete(isolated_clikan_home):
     assert "n_--task_test_multi_1" not in result.output
     assert "n_--task_test_multi_2" not in result.output
     assert "n_--task_test_multi_3" in result.output
-
-
-# Known uncovered command path
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="KT-002: regress Click argument binding is currently broken",
-)
-def test_command_regress_known_issue(isolated_clikan_home):
-    """Capture KT-002 without making the KT-009 isolation change depend on it."""
-    write_config(isolated_clikan_home)
-    runner = CliRunner()
-    add_tasks(runner, "regress task")
-    assert runner.invoke(clikan, ["promote", "1"]).exit_code == 0
-    assert runner.invoke(clikan, ["promote", "1"]).exit_code == 0
-
-    result = runner.invoke(clikan, ["regress", "1"])
-
-    assert result.exit_code == 0
-    assert "Regressing task 1 to in-progress." in result.output
 
 
 # Repaint tests
