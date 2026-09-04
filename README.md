@@ -83,6 +83,29 @@ Successful mutations use short task-centric messages such as `Added #12`, `Start
 
 Unique command prefixes are accepted only when unambiguous.
 
+## Board view and filters
+
+The table view renders one task per row, wraps long descriptions, shows TODO/WIP capacity, marks full columns, and provides actionable empty states.
+
+`show` supports state and text filtering without changing the board:
+
+```bash
+kanban-tui show --state todo
+kanban-tui show --state inprogress
+kanban-tui show --search login
+kanban-tui show --state todo --search login
+```
+
+Search is case-insensitive. Manual task order is the default, but temporary sort views are available:
+
+```bash
+kanban-tui show --sort id
+kanban-tui show --sort created
+kanban-tui show --sort modified
+```
+
+Sorting changes only the current view; it does not rewrite persisted manual ordering.
+
 ## Output formats
 
 ```bash
@@ -95,7 +118,7 @@ kanban-tui show --format json
 - `plain` emits deterministic tab-separated text without color codes.
 - `json` emits structured task data with timezone-aware ISO 8601 timestamps.
 
-All formats use the same deterministic ordering and completed-task display limit. Rich output honors `NO_COLOR`.
+Filters and sorting apply consistently to all three formats. All formats use the configured completed-task display limit. Rich output honors `NO_COLOR`.
 
 ## Project structure
 
