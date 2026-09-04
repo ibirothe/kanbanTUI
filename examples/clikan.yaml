@@ -1,0 +1,7 @@
+clikan_data: /path/to/.clikan.dat
+limits:
+  todo: 10
+  wip: 3
+  done: 10
+  taskname: 40
+repaint: true
