@@ -49,10 +49,17 @@ class Task:
     text: str
     modified_at: datetime
     created_at: datetime
+    position: int = 0
 
     def __post_init__(self) -> None:
         self.modified_at = parse_timestamp(self.modified_at)
         self.created_at = parse_timestamp(self.created_at)
+        if isinstance(self.position, bool) or not isinstance(self.position, int):
+            raise ValueError("task position must be a non-negative integer")
+        if self.position < 0:
+            raise ValueError("task position must be a non-negative integer")
+        if self.position == 0:
+            self.position = self.id
 
     @classmethod
     def from_record(cls, task_id: int, record: Any, *, deleted: bool = False) -> "Task":
@@ -88,20 +95,34 @@ class Task:
         except ValueError as exc:
             raise ValueError(f"task {task_id} has an invalid timestamp: {exc}") from exc
 
+        position = task_id
+        if len(record) >= 5:
+            raw_position = record[4]
+            if isinstance(raw_position, bool):
+                raise ValueError(f"task {task_id} has an invalid position")
+            try:
+                position = int(raw_position)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"task {task_id} has an invalid position") from exc
+            if position < 1:
+                raise ValueError(f"task {task_id} has an invalid position")
+
         return cls(
             id=task_id,
             state=state,
             text=record[1],
             modified_at=modified_at,
             created_at=created_at,
+            position=position,
         )
 
-    def to_record(self) -> list[str]:
+    def to_record(self) -> list[str | int]:
         return [
             self.state.value,
             self.text,
             format_timestamp(self.modified_at),
             format_timestamp(self.created_at),
+            self.position,
         ]
 
 
@@ -166,6 +187,38 @@ class Board:
         """Return the next ID without reusing IDs from deleted history."""
         return max((*self.active, *self.deleted), default=0) + 1
 
+    def next_position(self, state: TaskState) -> int:
+        """Return the next position at the bottom of an active state."""
+        return (
+            max(
+                (
+                    task.position
+                    for task in self.active.values()
+                    if task.state is state
+                ),
+                default=0,
+            )
+            + 1
+        )
+
+    def ordered_tasks(self, state: TaskState) -> list[Task]:
+        """Return tasks in manual order, except DONE which is completion ordered."""
+        tasks = [task for task in self.active.values() if task.state is state]
+        if state is TaskState.DONE:
+            return sorted(
+                tasks,
+                key=lambda task: (task.modified_at, task.id),
+                reverse=True,
+            )
+        return sorted(tasks, key=lambda task: (task.position, task.id))
+
+    def normalize_positions(self, state: TaskState) -> None:
+        """Compact manual positions for one active state."""
+        if state is TaskState.DONE:
+            return
+        for position, task in enumerate(self.ordered_tasks(state), start=1):
+            task.position = position
+
     @classmethod
     def from_mapping(cls, raw: Any) -> "Board":
         if not isinstance(raw, dict):
@@ -185,7 +238,7 @@ class Board:
         }
         return cls(active=active, deleted=deleted)
 
-    def to_mapping(self) -> dict[str, dict[int, list[str]]]:
+    def to_mapping(self) -> dict[str, dict[int, list[str | int]]]:
         return {
             "data": {
                 task_id: task.to_record() for task_id, task in self.active.items()
