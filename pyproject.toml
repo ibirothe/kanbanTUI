@@ -28,6 +28,7 @@ dependencies = [
     "click-default-group>=1.2.4",
     "PyYAML>=6.0",
     "rich>=13.0",
+    "textual>=8.2.8,<9",
 ]
 
 [project.optional-dependencies]
