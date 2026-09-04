@@ -142,6 +142,9 @@ def _task_payload(task: Task) -> dict[str, object]:
         "text": task.text,
         "created_at": format_timestamp(task.created_at),
         "modified_at": format_timestamp(task.modified_at),
+        "completed_at": (
+            format_timestamp(task.completed_at) if task.completed_at is not None else None
+        ),
         "priority": task.priority.value if task.priority is not None else None,
         "tags": list(task.tags),
     }
@@ -191,7 +194,9 @@ def format_plain(
     unprioritized_only: bool = False,
     tag_filter: str | None = None,
 ) -> str:
-    lines = ["id\tstate\ttext\tcreated_at\tmodified_at\tpriority\ttags"]
+    lines = [
+        "id\tstate\ttext\tcreated_at\tmodified_at\tcompleted_at\tpriority\ttags"
+    ]
     for task in visible_tasks(
         config,
         board,
@@ -210,6 +215,11 @@ def format_plain(
                     _escape_plain_text(task.text),
                     format_timestamp(task.created_at),
                     format_timestamp(task.modified_at),
+                    (
+                        format_timestamp(task.completed_at)
+                        if task.completed_at is not None
+                        else ""
+                    ),
                     task.priority.value if task.priority is not None else "",
                     ",".join(task.tags),
                 ]
