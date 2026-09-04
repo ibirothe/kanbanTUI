@@ -59,7 +59,7 @@ def list_named_boards() -> list[str]:
 def _resolve_data_path(raw_path: str, config_path: Path) -> Path:
     data_path = Path(raw_path).expanduser()
     if data_path.is_absolute():
-        return data_path
+        return data_path.resolve()
     return (config_path.parent / data_path).resolve()
 
 
@@ -75,6 +75,13 @@ def validate_config(config, config_path: Path) -> AppConfig:
             f"Config file {config_path} must define a non-empty data_path."
         )
 
+    resolved_config_path = config_path.expanduser().resolve()
+    data_path = _resolve_data_path(raw_data_path, resolved_config_path)
+    if data_path == resolved_config_path:
+        raise click.ClickException(
+            f"Config file {resolved_config_path}: data_path must not point to the config file itself."
+        )
+
     try:
         limits = Limits.from_mapping(config.get("limits"))
     except ValueError as exc:
@@ -87,7 +94,7 @@ def validate_config(config, config_path: Path) -> AppConfig:
         )
 
     return AppConfig(
-        data_path=_resolve_data_path(raw_data_path, config_path),
+        data_path=data_path,
         limits=limits,
         repaint=repaint,
     )
