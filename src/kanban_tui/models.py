@@ -1,15 +1,11 @@
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
 
 LEGACY_TIMESTAMP_FORMAT = "%Y-%b-%d %H:%M:%S"
-
-
-def _local_timezone():
-    return datetime.now().astimezone().tzinfo or timezone.utc
 
 
 def parse_timestamp(value: Any) -> datetime:
@@ -28,14 +24,14 @@ def parse_timestamp(value: Any) -> datetime:
         raise ValueError(f"invalid timestamp {value!r}")
 
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=_local_timezone())
+        parsed = parsed.astimezone()
     return parsed
 
 
 def format_timestamp(value: datetime) -> str:
     """Serialize a timestamp as timezone-aware ISO 8601 to second precision."""
     if value.tzinfo is None:
-        value = value.replace(tzinfo=_local_timezone())
+        value = value.astimezone()
     return value.isoformat(timespec="seconds")
 
 
