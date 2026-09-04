@@ -51,6 +51,60 @@ def test_add_unquoted_words_create_one_task(runner, write_config):
     assert "[2]" not in show_result.output
 
 
+def test_edit_updates_active_task_text(runner, write_config):
+    write_config()
+    runner.invoke(clikan, ["add", "old", "text"])
+    runner.invoke(clikan, ["promote", "1"])
+
+    edit_result = runner.invoke(clikan, ["edit", "1", "new", "text"])
+    show_result = runner.invoke(clikan, ["show"])
+
+    assert edit_result.exit_code == 0
+    assert "Updated task 1 -> new text" in edit_result.output
+    assert "new text" in show_result.output
+    assert "in-progress" in show_result.output
+
+
+def test_edit_deleted_task_is_rejected(runner, write_config):
+    write_config()
+    runner.invoke(clikan, ["add", "task"])
+    runner.invoke(clikan, ["delete", "1"])
+
+    result = runner.invoke(clikan, ["edit", "1", "new"])
+
+    assert result.exit_code == 1
+    assert "Can not edit deleted task 1." in result.output
+
+
+def test_history_lists_deleted_tasks_and_restore_recovers_them(runner, write_config):
+    write_config()
+    runner.invoke(clikan, ["add", "recover", "me"])
+    runner.invoke(clikan, ["delete", "1"])
+
+    history_result = runner.invoke(clikan, ["history"])
+    restore_result = runner.invoke(clikan, ["restore", "1"])
+    show_result = runner.invoke(clikan, ["show"])
+
+    assert history_result.exit_code == 0
+    assert "recover me" in history_result.output
+    assert "deleted / modified" in history_result.output
+    assert restore_result.exit_code == 0
+    assert "Restored task 1 to todo." in restore_result.output
+    assert "[1] recover me" in show_result.output
+
+
+def test_restore_respects_todo_limit(runner, write_config):
+    write_config(limits={"todo": 1})
+    runner.invoke(clikan, ["add", "old"])
+    runner.invoke(clikan, ["delete", "1"])
+    runner.invoke(clikan, ["add", "active"])
+
+    result = runner.invoke(clikan, ["restore", "1"])
+
+    assert result.exit_code == 1
+    assert "Can not restore, todo limit of 1 reached." in result.output
+
+
 def test_unique_command_prefixes_are_supported(runner, write_config):
     write_config()
 
@@ -84,7 +138,9 @@ def test_missing_operands_use_click_usage_errors(runner, write_config):
     write_config()
 
     assert runner.invoke(clikan, ["add"]).exit_code == 2
+    assert runner.invoke(clikan, ["edit", "1"]).exit_code == 2
     assert runner.invoke(clikan, ["promote"]).exit_code == 2
+    assert runner.invoke(clikan, ["restore"]).exit_code == 2
 
 
 def test_repaint_outputs_board(runner, write_config):
