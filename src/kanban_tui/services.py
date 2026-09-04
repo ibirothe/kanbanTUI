@@ -11,10 +11,25 @@ def _count_state(board: Board, state: TaskState) -> int:
     return sum(1 for task in board.active.values() if task.state is state)
 
 
+def _state_limit(config: AppConfig, state: TaskState) -> int | None:
+    if state is TaskState.TODO:
+        return config.limits.todo
+    if state is TaskState.IN_PROGRESS:
+        return config.limits.wip
+    return None
+
+
+def state_limit_reached(config: AppConfig, board: Board, state: TaskState) -> bool:
+    limit = _state_limit(config, state)
+    return limit is not None and limit <= _count_state(board, state)
+
+
 def wip_limit_reached(config: AppConfig, board: Board) -> bool:
-    if config.limits.wip is None:
-        return False
-    return config.limits.wip <= _count_state(board, TaskState.IN_PROGRESS)
+    return state_limit_reached(config, board, TaskState.IN_PROGRESS)
+
+
+def todo_limit_reached(config: AppConfig, board: Board) -> bool:
+    return state_limit_reached(config, board, TaskState.TODO)
 
 
 def add_tasks(config: AppConfig, board: Board, tasks):
@@ -28,14 +43,11 @@ def add_tasks(config: AppConfig, board: Board, tasks):
             )
             continue
 
-        if (
-            config.limits.todo is not None
-            and config.limits.todo <= _count_state(board, TaskState.TODO)
-        ):
+        if todo_limit_reached(config, board):
             messages.append("No new todos, limit reached already.")
             continue
 
-        task_id = max(board.active, default=0) + 1
+        task_id = board.next_task_id()
         now = timestamp()
         board.active[task_id] = Task(
             id=task_id,
@@ -127,9 +139,15 @@ def regress_tasks(config: AppConfig, board: Board, ids):
                 task.modified_at = timestamp()
                 messages.append("Regressing task %s to in-progress." % task_id)
         elif task.state is TaskState.IN_PROGRESS:
-            task.state = TaskState.TODO
-            task.modified_at = timestamp()
-            messages.append("Regressing task %s to todo." % task_id)
+            if todo_limit_reached(config, board):
+                messages.append(
+                    "Can not regress, todo limit of %s reached."
+                    % config.limits.todo
+                )
+            else:
+                task.state = TaskState.TODO
+                task.modified_at = timestamp()
+                messages.append("Regressing task %s to todo." % task_id)
         else:
             messages.append("Already in todo, can not regress %s" % task_id)
 
