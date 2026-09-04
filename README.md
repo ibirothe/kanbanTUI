@@ -115,6 +115,7 @@ Keyboard controls:
 - `e`: edit the selected task.
 - `d`: archive the selected task.
 - `r`: restore an archived task by ID.
+- `u`: undo the last successful board mutation.
 - `/`: search/filter the live board.
 - `c`: clear the current search filter.
 - `?`: show keyboard help.
@@ -136,6 +137,7 @@ kanban-tui move 3 before 1
 kanban-tui delete 1
 kanban-tui history
 kanban-tui restore 1
+kanban-tui undo
 ```
 
 `start`, `done`, and `todo` move tasks directly to the requested state. The older `promote` and `regress` commands remain available as one-step transition shortcuts.
@@ -147,6 +149,34 @@ TODO and IN PROGRESS tasks have persistent manual ordering. Use `move <id> top`,
 Successful mutations use short task-centric messages such as `Added #12`, `Started #12`, and `Completed #12`. Rejected operations begin with `Error:` and return a non-zero exit status. For multi-ID commands, the command returns non-zero if any requested operation fails.
 
 Unique command prefixes are accepted only when unambiguous.
+
+## Undo
+
+kanbanTUI keeps one atomic undo snapshot per board. Every successful mutation records the complete board state that existed immediately before that mutation; failed or no-op commands do not replace the snapshot.
+
+```bash
+kanban-tui add Temporary task
+kanban-tui undo
+```
+
+Undo covers task creation, edits, state changes, ordering, archive/restore operations, mixed successful batches, and imports. There is intentionally one undo level: after `undo`, there is no redo snapshot.
+
+The interactive TUI exposes the same operation with `u`.
+
+## Board export and import
+
+`show --format json` is a filtered view and is not a backup format. Use the dedicated transfer commands for complete board portability:
+
+```bash
+kanban-tui export board.json
+kanban-tui export board.json --force
+kanban-tui import board.json --mode merge
+kanban-tui import board.json --mode replace
+```
+
+The versioned `kanbanTUI-board` JSON format contains every active and archived task, including IDs, states, timestamps, and manual positions. It is independent of the DONE display limit and `show` filters.
+
+`merge` preserves the current board and appends imported tasks, but rejects task-ID conflicts. `replace` replaces the selected board with the imported board. Both modes validate the complete import and configured TODO/WIP capacities before writing. A successful import can be reverted with `undo`.
 
 ## Board view and filters
 
@@ -196,6 +226,7 @@ src/kanban_tui/
   rendering.py
   services.py
   storage.py
+  transfer.py
   tui.py
 
 tests/
