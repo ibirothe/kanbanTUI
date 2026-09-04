@@ -45,11 +45,15 @@ Supported settings:
 
 ```bash
 clikan show
-clikan add "Task text"
+clikan add Fix login bug
 clikan promote 1
 clikan regress 1
 clikan delete 1
 ```
+
+`add` treats all words after the command as one task description, so quoting normal task text is optional. Empty task text is rejected.
+
+Commands that require task IDs or task text report a standard Click usage error when their operand is missing. Rejected task operations such as invalid IDs, unknown IDs, capacity-limit failures, or invalid task text return a non-zero exit code. For commands that accept multiple IDs, the command returns non-zero if any requested operation fails, even when other items succeed.
 
 Unique command prefixes are accepted, so `s`, `a`, `p`, and `d` work for `show`, `add`, `promote`, and `delete` respectively.
 
