@@ -23,6 +23,16 @@ def test_configure_creates_default_config(runner, isolated_app_home):
     assert "Creating" in result.output
 
 
+def test_empty_board_has_actionable_hint(runner, write_config):
+    write_config()
+
+    result = runner.invoke(main, ["show"])
+
+    assert result.exit_code == 0
+    assert "No tasks yet." in result.output
+    assert "kanban-tui add <task>" in result.output
+
+
 def test_add_show_start_todo_delete(runner, write_config):
     write_config()
 
@@ -89,7 +99,7 @@ def test_edit_updates_active_task_text(runner, write_config):
     assert edit_result.exit_code == 0
     assert "Updated #1: new text" in edit_result.output
     assert "new text" in show_result.output
-    assert "in-progress" in show_result.output
+    assert "IN PROGRESS" in show_result.output
 
 
 def test_edit_deleted_task_is_rejected(runner, write_config):
@@ -103,7 +113,7 @@ def test_edit_deleted_task_is_rejected(runner, write_config):
     assert "Error: archived task #1 cannot be edited." in result.output
 
 
-def test_history_lists_deleted_tasks_and_restore_recovers_them(runner, write_config):
+def test_history_lists_archived_tasks_and_restore_recovers_them(runner, write_config):
     write_config()
     runner.invoke(main, ["add", "recover", "me"])
     runner.invoke(main, ["delete", "1"])
@@ -114,7 +124,7 @@ def test_history_lists_deleted_tasks_and_restore_recovers_them(runner, write_con
 
     assert history_result.exit_code == 0
     assert "recover me" in history_result.output
-    assert "deleted / modified" in history_result.output
+    assert "archived / modified" in history_result.output
     assert restore_result.exit_code == 0
     assert "Restored #1 to TODO." in restore_result.output
     assert "[1] recover me" in show_result.output
@@ -187,7 +197,7 @@ def test_repaint_outputs_board(runner, write_config):
 
     assert result.exit_code == 0
     assert "task" in result.output
-    assert "todo" in result.output
+    assert "TODO" in result.output
 
 
 def test_invalid_task_id_returns_failure(runner, write_config):
@@ -285,9 +295,51 @@ def test_show_plain_is_color_free(runner, write_config):
     assert "\x1b[" not in result.output
 
 
-def test_show_rejects_unknown_format(runner, write_config):
+def test_show_search_and_state_filters_apply_to_json(runner, write_config):
+    write_config()
+    runner.invoke(main, ["add", "Fix", "Login"])
+    runner.invoke(main, ["add", "login", "tests"])
+    runner.invoke(main, ["start", "2"])
+    runner.invoke(main, ["add", "docs"])
+
+    result = runner.invoke(
+        main,
+        ["show", "--format", "json", "--state", "todo", "--search", "LOGIN"],
+    )
+    payload = json.loads(result.output)
+
+    assert result.exit_code == 0
+    assert [item["id"] for item in payload["tasks"]] == [1]
+
+
+def test_show_sort_id_can_override_manual_order(runner, write_config):
+    write_config()
+    runner.invoke(main, ["add", "one"])
+    runner.invoke(main, ["add", "two"])
+    runner.invoke(main, ["move", "2", "top"])
+
+    manual = json.loads(runner.invoke(main, ["show", "--format", "json"]).output)
+    by_id = json.loads(
+        runner.invoke(main, ["show", "--format", "json", "--sort", "id"]).output
+    )
+
+    assert [item["id"] for item in manual["tasks"]] == [2, 1]
+    assert [item["id"] for item in by_id["tasks"]] == [1, 2]
+
+
+def test_show_table_reports_no_matching_tasks(runner, write_config):
+    write_config()
+    runner.invoke(main, ["add", "task"])
+
+    result = runner.invoke(main, ["show", "--search", "missing"])
+
+    assert result.exit_code == 0
+    assert "No matching tasks." in result.output
+
+
+def test_show_rejects_unknown_format_state_and_sort(runner, write_config):
     write_config()
 
-    result = runner.invoke(main, ["show", "--format", "xml"])
-
-    assert result.exit_code == 2
+    assert runner.invoke(main, ["show", "--format", "xml"]).exit_code == 2
+    assert runner.invoke(main, ["show", "--state", "blocked"]).exit_code == 2
+    assert runner.invoke(main, ["show", "--sort", "priority"]).exit_code == 2
