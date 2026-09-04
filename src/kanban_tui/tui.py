@@ -451,11 +451,12 @@ class KanbanApp(App[None]):
     async def _restore_prompt_result(self, value: str | None) -> None:
         if value is None or not value.strip():
             return
-        task_id = int(value)
+        raw_task_id = value.strip()
+        focus_task_id = int(raw_task_id) if raw_task_id.isdecimal() else None
         await self._mutate(
-            lambda board: restore_tasks(self.config, board, [str(task_id)]),
-            focus_task_id=task_id,
-            focus_state=TaskState.TODO,
+            lambda board: restore_tasks(self.config, board, [raw_task_id]),
+            focus_task_id=focus_task_id,
+            focus_state=TaskState.TODO if focus_task_id is not None else None,
         )
 
     async def action_undo(self) -> None:
