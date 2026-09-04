@@ -3,9 +3,9 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "clikan"
+name = "kanbanTUI"
 dynamic = ["version"]
-description = "Simple CLI-based personal Kanban board"
+description = "Terminal personal Kanban board"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -34,14 +34,13 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
-    "build>=1.2",
     "ruff>=0.12",
     "mypy>=1.11",
     "types-PyYAML>=6.0",
 ]
 
 [project.scripts]
-clikan = "kanban_tui.cli:clikan"
+kanban-tui = "kanban_tui.cli:main"
 
 [project.urls]
 Repository = "https://github.com/ibirothe/kanbanTUI"
