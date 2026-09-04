@@ -109,3 +109,23 @@ async def test_tui_capacity_rejection_keeps_focus_and_state(write_config):
         assert app.board.active[2].state is TaskState.TODO
         assert app._last_list_id == "todo-list"
         assert app._selected_task().id == 2
+
+
+async def test_tui_undo_shortcut_restores_previous_board(write_config):
+    config = write_config()
+    seed_board(config, "task")
+    app = KanbanApp(config)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("right")
+        await pilot.pause()
+        assert app.board.active[1].state is TaskState.IN_PROGRESS
+
+        await pilot.press("u")
+        await pilot.pause()
+        assert app.board.active[1].state is TaskState.TODO
+        assert app._selected_task().id == 1
+
+    persisted = read_data(config, initialize_missing=False)
+    assert persisted.active[1].state is TaskState.TODO
