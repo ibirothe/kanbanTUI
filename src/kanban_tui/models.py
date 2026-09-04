@@ -35,11 +35,15 @@ class Task:
                 f"task {task_id} has unsupported state {record[0]!r}"
             ) from exc
 
-        allowed = {TaskState.DELETED} if deleted else {
-            TaskState.TODO,
-            TaskState.IN_PROGRESS,
-            TaskState.DONE,
-        }
+        allowed = (
+            {TaskState.DELETED}
+            if deleted
+            else {
+                TaskState.TODO,
+                TaskState.IN_PROGRESS,
+                TaskState.DONE,
+            }
+        )
         if state not in allowed:
             raise ValueError(f"task {task_id} has invalid state {state.value!r}")
 
@@ -106,6 +110,16 @@ class Board:
     active: dict[int, Task] = field(default_factory=dict)
     deleted: dict[int, Task] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        overlapping_ids = set(self.active).intersection(self.deleted)
+        if overlapping_ids:
+            ids = ", ".join(str(task_id) for task_id in sorted(overlapping_ids))
+            raise ValueError(f"task ids cannot be both active and deleted: {ids}")
+
+    def next_task_id(self) -> int:
+        """Return the next ID without reusing IDs from deleted history."""
+        return max((*self.active, *self.deleted), default=0) + 1
+
     @classmethod
     def from_mapping(cls, raw: Any) -> "Board":
         if not isinstance(raw, dict):
@@ -128,11 +142,9 @@ class Board:
     def to_mapping(self) -> dict[str, dict[int, list[str]]]:
         return {
             "data": {
-                task_id: task.to_record()
-                for task_id, task in self.active.items()
+                task_id: task.to_record() for task_id, task in self.active.items()
             },
             "deleted": {
-                task_id: task.to_record()
-                for task_id, task in self.deleted.items()
+                task_id: task.to_record() for task_id, task in self.deleted.items()
             },
         }
