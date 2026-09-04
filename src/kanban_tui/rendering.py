@@ -94,7 +94,7 @@ def render_board(
     todos, inprogs, dones = board_columns(config, board)
     table = Table(show_header=True, show_footer=True)
     table.add_column(
-        "[bold yellow]todo[/bold yellow]", no_wrap=True, footer="clikan"
+        "[bold yellow]todo[/bold yellow]", no_wrap=True, footer="kanbanTUI"
     )
     table.add_column("[bold green]in-progress[/bold green]", no_wrap=True)
     table.add_column(
