@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from kanban_tui.cli import clikan
 
 
