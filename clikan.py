@@ -1,9 +1,11 @@
+from contextlib import contextmanager
 from rich.console import Console
 from rich.table import Table
 import click
 from click_default_group import DefaultGroup
 import yaml
 import os
+import tempfile
 from textwrap import wrap
 import collections
 import datetime
@@ -202,6 +204,44 @@ def validate_data(data, data_path):
     return data
 
 
+@contextmanager
+def datastore_lock(config):
+    """Serialize access to one datastore using an atomic lock directory."""
+    data_path = os.path.abspath(config['clikan_data'])
+    lock_path = data_path + '.lock'
+    owner_path = os.path.join(lock_path, 'owner')
+
+    try:
+        os.mkdir(lock_path)
+    except FileExistsError:
+        raise click.ClickException(
+            'Datastore %s is locked by another clikan process. '
+            'If no clikan process is active, remove %s.'
+            % (data_path, lock_path)
+        )
+    except OSError as exc:
+        raise click.ClickException(
+            'Could not lock datastore %s: %s' % (data_path, exc)
+        )
+
+    try:
+        try:
+            with open(owner_path, 'w') as owner_file:
+                owner_file.write(str(os.getpid()))
+        except OSError:
+            pass
+        yield
+    finally:
+        try:
+            os.unlink(owner_path)
+        except OSError:
+            pass
+        try:
+            os.rmdir(lock_path)
+        except OSError:
+            pass
+
+
 def wip_limit_reached(config, dd):
     """Return True when another transition into WIP would exceed its limit."""
     if 'wip' not in config['limits']:
@@ -244,29 +284,31 @@ def configure():
 def add(tasks):
     """Add a tasks in todo"""
     config = read_config_yaml()
-    dd = read_data(config)
     taskname_length = config['limits']['taskname']
 
-    for task in tasks:
-        if len(task) > taskname_length:
-            click.echo('Task must be at most %s chars, Brevity counts: %s'
-                       % (taskname_length, task))
-        else:
-            todos, inprogs, dones = split_items(config, dd)
-            if ('todo' in config['limits'] and
-                    config['limits']['todo'] <= len(todos)):
-                click.echo('No new todos, limit reached already.')
+    with datastore_lock(config):
+        dd = read_data(config)
+        for task in tasks:
+            if len(task) > taskname_length:
+                click.echo('Task must be at most %s chars, Brevity counts: %s'
+                           % (taskname_length, task))
             else:
-                od = collections.OrderedDict(sorted(dd['data'].items()))
-                new_id = 1
-                if bool(od):
-                    new_id = next(reversed(od)) + 1
-                entry = ['todo', task, timestamp(), timestamp()]
-                dd['data'].update({new_id: entry})
-                click.echo("Creating new task w/ id: %d -> %s"
-                           % (new_id, task))
+                todos, inprogs, dones = split_items(config, dd)
+                if ('todo' in config['limits'] and
+                        config['limits']['todo'] <= len(todos)):
+                    click.echo('No new todos, limit reached already.')
+                else:
+                    od = collections.OrderedDict(sorted(dd['data'].items()))
+                    new_id = 1
+                    if bool(od):
+                        new_id = next(reversed(od)) + 1
+                    entry = ['todo', task, timestamp(), timestamp()]
+                    dd['data'].update({new_id: entry})
+                    click.echo("Creating new task w/ id: %d -> %s"
+                               % (new_id, task))
 
-    write_data(config, dd)
+        write_data(config, dd)
+
     if config['repaint']:
         display()
 
@@ -276,23 +318,25 @@ def add(tasks):
 def delete(ids):
     """Delete task"""
     config = read_config_yaml()
-    dd = read_data(config)
 
-    for id in ids:
-        try:
-            item = dd['data'].get(int(id))
-            if item is None:
-                click.echo('No existing task with that id: %d' % int(id))
-            else:
-                item[0] = 'deleted'
-                item[2] = timestamp()
-                dd['deleted'].update({int(id): item})
-                dd['data'].pop(int(id))
-                click.echo('Removed task %d.' % int(id))
-        except ValueError:
-            click.echo('Invalid task id')
+    with datastore_lock(config):
+        dd = read_data(config)
+        for id in ids:
+            try:
+                item = dd['data'].get(int(id))
+                if item is None:
+                    click.echo('No existing task with that id: %d' % int(id))
+                else:
+                    item[0] = 'deleted'
+                    item[2] = timestamp()
+                    dd['deleted'].update({int(id): item})
+                    dd['data'].pop(int(id))
+                    click.echo('Removed task %d.' % int(id))
+            except ValueError:
+                click.echo('Invalid task id')
 
-    write_data(config, dd)
+        write_data(config, dd)
+
     if config['repaint']:
         display()
 
@@ -302,35 +346,39 @@ def delete(ids):
 def promote(ids):
     """Promote task"""
     config = read_config_yaml()
-    dd = read_data(config)
 
-    for id in ids:
-        try:
-            item = dd['data'].get(int(id))
-            if item is None:
-                click.echo('No existing task with that id: %s' % id)
-            elif item[0] == 'todo':
-                if wip_limit_reached(config, dd):
-                    click.echo(
-                        'Can not promote, in-progress limit of %s reached.'
-                        % config['limits']['wip']
-                    )
-                else:
-                    click.echo('Promoting task %s to in-progress.' % id)
+    with datastore_lock(config):
+        dd = read_data(config)
+        for id in ids:
+            try:
+                item = dd['data'].get(int(id))
+                if item is None:
+                    click.echo('No existing task with that id: %s' % id)
+                elif item[0] == 'todo':
+                    if wip_limit_reached(config, dd):
+                        click.echo(
+                            'Can not promote, in-progress limit of %s reached.'
+                            % config['limits']['wip']
+                        )
+                    else:
+                        click.echo('Promoting task %s to in-progress.' % id)
+                        dd['data'][int(id)] = [
+                            'inprogress',
+                            item[1], timestamp(),
+                            item[3]
+                        ]
+                elif item[0] == 'inprogress':
+                    click.echo('Promoting task %s to done.' % id)
                     dd['data'][int(id)] = [
-                        'inprogress',
-                        item[1], timestamp(),
-                        item[3]
+                        'done', item[1], timestamp(), item[3]
                     ]
-            elif item[0] == 'inprogress':
-                click.echo('Promoting task %s to done.' % id)
-                dd['data'][int(id)] = ['done', item[1], timestamp(), item[3]]
-            else:
-                click.echo('Can not promote %s, already done.' % id)
-        except ValueError:
-            click.echo('Invalid task id')
+                else:
+                    click.echo('Can not promote %s, already done.' % id)
+            except ValueError:
+                click.echo('Invalid task id')
 
-    write_data(config, dd)
+        write_data(config, dd)
+
     if config['repaint']:
         display()
 
@@ -340,33 +388,37 @@ def promote(ids):
 def regress(ids):
     """Regress task"""
     config = read_config_yaml()
-    dd = read_data(config)
 
-    for id in ids:
-        try:
-            item = dd['data'].get(int(id))
-            if item is None:
-                click.echo('No existing task with id: %s' % id)
-            elif item[0] == 'done':
-                if wip_limit_reached(config, dd):
-                    click.echo(
-                        'Can not regress, in-progress limit of %s reached.'
-                        % config['limits']['wip']
-                    )
-                else:
-                    click.echo('Regressing task %s to in-progress.' % id)
+    with datastore_lock(config):
+        dd = read_data(config)
+        for id in ids:
+            try:
+                item = dd['data'].get(int(id))
+                if item is None:
+                    click.echo('No existing task with id: %s' % id)
+                elif item[0] == 'done':
+                    if wip_limit_reached(config, dd):
+                        click.echo(
+                            'Can not regress, in-progress limit of %s reached.'
+                            % config['limits']['wip']
+                        )
+                    else:
+                        click.echo('Regressing task %s to in-progress.' % id)
+                        dd['data'][int(id)] = [
+                            'inprogress', item[1], timestamp(), item[3]
+                        ]
+                elif item[0] == 'inprogress':
+                    click.echo('Regressing task %s to todo.' % id)
                     dd['data'][int(id)] = [
-                        'inprogress', item[1], timestamp(), item[3]
+                        'todo', item[1], timestamp(), item[3]
                     ]
-            elif item[0] == 'inprogress':
-                click.echo('Regressing task %s to todo.' % id)
-                dd['data'][int(id)] = ['todo', item[1], timestamp(), item[3]]
-            else:
-                click.echo('Already in todo, can not regress %s' % id)
-        except ValueError:
-            click.echo('Invalid task id')
+                else:
+                    click.echo('Already in todo, can not regress %s' % id)
+            except ValueError:
+                click.echo('Invalid task id')
 
-    write_data(config, dd)
+        write_data(config, dd)
+
     if config['repaint']:
         display()
 
@@ -378,9 +430,11 @@ def display():
     console = Console()
     """Show tasks in clikan"""
     config = read_config_yaml()
-    dd = read_data(config)
-    todos, inprogs, dones = split_items(config, dd)
-    dones = dones[0:config['limits']['done']]
+
+    with datastore_lock(config):
+        dd = read_data(config)
+        todos, inprogs, dones = split_items(config, dd)
+        dones = dones[0:config['limits']['done']]
 
     todos = '\n'.join([str(x) for x in todos])
     inprogs = '\n'.join([str(x) for x in inprogs])
@@ -434,15 +488,38 @@ def read_data(config):
 
 
 def write_data(config, data):
-    """Write the data to the config datasource."""
+    """Atomically replace the datastore with validated YAML data."""
     data_path = config['clikan_data']
+    validate_data(data, data_path)
+
+    directory = os.path.dirname(os.path.abspath(data_path))
+    temp_path = None
     try:
-        with open(data_path, 'w') as outfile:
+        with tempfile.NamedTemporaryFile(
+            mode='w',
+            encoding='utf-8',
+            dir=directory,
+            prefix='.clikan-',
+            suffix='.tmp',
+            delete=False,
+        ) as outfile:
+            temp_path = outfile.name
             yaml.safe_dump(data, outfile, default_flow_style=False)
-    except OSError as exc:
+            outfile.flush()
+            os.fsync(outfile.fileno())
+
+        os.replace(temp_path, data_path)
+        temp_path = None
+    except (OSError, yaml.YAMLError) as exc:
         raise click.ClickException(
             'Could not write datastore %s: %s' % (data_path, exc)
         )
+    finally:
+        if temp_path is not None:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
 
 
 def get_clikan_home():
