@@ -22,6 +22,8 @@ For local development:
 python -m pip install -e ".[dev]"
 ```
 
+Do not use `pip install clikan` to install this fork: that PyPI distribution belongs to the upstream project. PyPI publication for this maintained fork is deferred until a unique distribution name is selected in KT-034.
+
 ## Configuration
 
 Create the default configuration with:
@@ -110,6 +112,12 @@ tests/
 ```
 
 See [`docs/architecture.md`](docs/architecture.md) for module responsibilities, domain models, task transitions, persistence format, configuration precedence, and locking behavior.
+
+## Release baseline
+
+The maintained release baseline is **0.5.0**. See [`CHANGELOG.md`](CHANGELOG.md) for the complete change summary.
+
+0.5.0 is prepared for GitHub/source-checkout use. Package-index publication is intentionally deferred until the distribution-name decision in KT-034 is resolved.
 
 ## Development
 
