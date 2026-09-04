@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -6,6 +7,7 @@ from typing import Any
 
 
 LEGACY_TIMESTAMP_FORMAT = "%Y-%b-%d %H:%M:%S"
+TAG_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
 
 
 def parse_timestamp(value: Any) -> datetime:
@@ -35,11 +37,30 @@ def format_timestamp(value: datetime) -> str:
     return value.isoformat(timespec="seconds")
 
 
+def normalize_tag(value: str) -> str:
+    """Normalize and validate one lightweight task tag."""
+    if not isinstance(value, str):
+        raise ValueError("tags must be strings")
+    normalized = value.strip().casefold()
+    if not TAG_PATTERN.fullmatch(normalized):
+        raise ValueError(
+            "tags must be 1-32 lowercase letters/numbers and may contain - or _"
+        )
+    return normalized
+
+
 class TaskState(str, Enum):
     TODO = "todo"
     IN_PROGRESS = "inprogress"
     DONE = "done"
     DELETED = "deleted"
+
+
+class TaskPriority(str, Enum):
+    LOW = "low"
+    NORMAL = "normal"
+    HIGH = "high"
+    URGENT = "urgent"
 
 
 @dataclass
@@ -50,6 +71,8 @@ class Task:
     modified_at: datetime
     created_at: datetime
     position: int = 0
+    priority: TaskPriority | None = None
+    tags: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         self.modified_at = parse_timestamp(self.modified_at)
@@ -60,6 +83,16 @@ class Task:
             raise ValueError("task position must be a non-negative integer")
         if self.position == 0:
             self.position = self.id
+
+        if self.priority is not None and not isinstance(self.priority, TaskPriority):
+            try:
+                self.priority = TaskPriority(self.priority)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("task priority is invalid") from exc
+
+        if isinstance(self.tags, str):
+            raise ValueError("task tags must be a collection of strings")
+        self.tags = tuple(sorted({normalize_tag(tag) for tag in self.tags}))
 
     @classmethod
     def from_record(cls, task_id: int, record: Any, *, deleted: bool = False) -> "Task":
@@ -107,6 +140,30 @@ class Task:
             if position < 1:
                 raise ValueError(f"task {task_id} has an invalid position")
 
+        priority: TaskPriority | None = None
+        tags: tuple[str, ...] = ()
+        if len(record) >= 6:
+            metadata = record[5]
+            if metadata is None:
+                metadata = {}
+            if not isinstance(metadata, dict):
+                raise ValueError(f"task {task_id} metadata must be a mapping")
+
+            raw_priority = metadata.get("priority")
+            if raw_priority is not None:
+                try:
+                    priority = TaskPriority(raw_priority)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"task {task_id} has an invalid priority") from exc
+
+            raw_tags = metadata.get("tags", [])
+            if not isinstance(raw_tags, list):
+                raise ValueError(f"task {task_id} tags must be a list")
+            try:
+                tags = tuple(sorted({normalize_tag(tag) for tag in raw_tags}))
+            except ValueError as exc:
+                raise ValueError(f"task {task_id} has invalid tags: {exc}") from exc
+
         return cls(
             id=task_id,
             state=state,
@@ -114,16 +171,26 @@ class Task:
             modified_at=modified_at,
             created_at=created_at,
             position=position,
+            priority=priority,
+            tags=tags,
         )
 
-    def to_record(self) -> list[str | int]:
-        return [
+    def to_record(self) -> list[Any]:
+        record: list[Any] = [
             self.state.value,
             self.text,
             format_timestamp(self.modified_at),
             format_timestamp(self.created_at),
             self.position,
         ]
+        metadata: dict[str, object] = {}
+        if self.priority is not None:
+            metadata["priority"] = self.priority.value
+        if self.tags:
+            metadata["tags"] = list(self.tags)
+        if metadata:
+            record.append(metadata)
+        return record
 
 
 @dataclass
@@ -238,7 +305,7 @@ class Board:
         }
         return cls(active=active, deleted=deleted)
 
-    def to_mapping(self) -> dict[str, dict[int, list[str | int]]]:
+    def to_mapping(self) -> dict[str, dict[int, list[Any]]]:
         return {
             "data": {
                 task_id: task.to_record() for task_id, task in self.active.items()
