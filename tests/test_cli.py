@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from kanban_tui.cli import clikan
@@ -193,3 +194,37 @@ def test_show_reads_existing_data_without_writer_lock(runner, write_config):
 
     assert result.exit_code == 0
     assert "task" in result.output
+
+
+def test_show_json_is_machine_readable(runner, write_config):
+    write_config()
+    runner.invoke(clikan, ["add", "json", "task"])
+
+    result = runner.invoke(clikan, ["show", "--format", "json"])
+    payload = json.loads(result.output)
+
+    assert result.exit_code == 0
+    assert payload["tasks"][0]["id"] == 1
+    assert payload["tasks"][0]["state"] == "todo"
+    assert payload["tasks"][0]["text"] == "json task"
+    assert payload["tasks"][0]["created_at"].endswith(("+00:00", "+01:00", "+02:00"))
+
+
+def test_show_plain_is_color_free(runner, write_config):
+    write_config()
+    runner.invoke(clikan, ["add", "plain", "task"])
+
+    result = runner.invoke(clikan, ["show", "--format", "plain"])
+
+    assert result.exit_code == 0
+    assert result.output.startswith("id\tstate\ttext\tcreated_at\tmodified_at\n")
+    assert "1\ttodo\tplain task\t" in result.output
+    assert "\x1b[" not in result.output
+
+
+def test_show_rejects_unknown_format(runner, write_config):
+    write_config()
+
+    result = runner.invoke(clikan, ["show", "--format", "xml"])
+
+    assert result.exit_code == 2
