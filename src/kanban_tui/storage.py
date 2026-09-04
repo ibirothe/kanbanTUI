@@ -144,16 +144,13 @@ def _atomic_write_mapping(data_path: Path, raw: dict[str, Any]) -> None:
                 pass
 
 
-def read_data(config: AppConfig, *, initialize_missing: bool = True) -> Board:
+def read_data(config: AppConfig, *, initialize_missing: bool = False) -> Board:
+    """Read the datastore without creating files or emitting user-facing output."""
     data_path = config.data_path
     try:
         raw = _read_raw_data(data_path)
     except FileNotFoundError:
-        board = Board()
-        if initialize_missing:
-            click.echo("No data, initializing data file.")
-            write_data(config, board)
-        return board
+        return Board()
 
     try:
         return Board.from_mapping(raw)
