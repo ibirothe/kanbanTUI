@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from pathlib import Path
 
 from kanban_tui.models import AppConfig, Board, Limits, Task, TaskState
@@ -11,12 +12,20 @@ from kanban_tui.services import (
 )
 
 
+NOW = datetime(2026, 9, 4, 10, 0, tzinfo=timezone.utc)
+BEFORE = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
+
+
 def base_config(**limits):
     return AppConfig(
         clikan_data=Path("/tmp/unused"),
         limits=Limits(**limits),
         repaint=False,
     )
+
+
+def task(task_id, state, text):
+    return Task(task_id, state, text, NOW, BEFORE)
 
 
 def test_add_and_delete_tasks():
@@ -64,8 +73,8 @@ def test_deleted_highest_id_is_not_reused():
 
 
 def test_edit_updates_text_without_changing_task_identity_or_state():
-    task = Task(1, TaskState.IN_PROGRESS, "old", "old-modified", "created")
-    board = Board(active={1: task})
+    original = task(1, TaskState.IN_PROGRESS, "old")
+    board = Board(active={1: original})
 
     result = edit_task(base_config(), board, "1", "  new task text  ")
 
@@ -73,14 +82,13 @@ def test_edit_updates_text_without_changing_task_identity_or_state():
     assert board.active[1].id == 1
     assert board.active[1].state is TaskState.IN_PROGRESS
     assert board.active[1].text == "new task text"
-    assert board.active[1].created_at == "created"
-    assert board.active[1].modified_at != "old-modified"
+    assert board.active[1].created_at == BEFORE
+    assert board.active[1].modified_at != NOW
+    assert board.active[1].modified_at.tzinfo is not None
 
 
 def test_edit_deleted_task_is_rejected():
-    board = Board(
-        deleted={1: Task(1, TaskState.DELETED, "old", "modified", "created")}
-    )
+    board = Board(deleted={1: task(1, TaskState.DELETED, "old")})
 
     result = edit_task(base_config(), board, "1", "new")
 
@@ -89,9 +97,7 @@ def test_edit_deleted_task_is_rejected():
 
 
 def test_restore_preserves_id_and_creation_time():
-    board = Board(
-        deleted={1: Task(1, TaskState.DELETED, "old", "modified", "created")}
-    )
+    board = Board(deleted={1: task(1, TaskState.DELETED, "old")})
 
     result = restore_tasks(base_config(), board, ["1"])
 
@@ -99,14 +105,15 @@ def test_restore_preserves_id_and_creation_time():
     assert 1 not in board.deleted
     assert board.active[1].id == 1
     assert board.active[1].state is TaskState.TODO
-    assert board.active[1].created_at == "created"
-    assert board.active[1].modified_at != "modified"
+    assert board.active[1].created_at == BEFORE
+    assert board.active[1].modified_at != NOW
+    assert board.active[1].modified_at.tzinfo is not None
 
 
 def test_restore_respects_todo_limit():
     board = Board(
-        active={1: Task(1, TaskState.TODO, "active", "now", "created")},
-        deleted={2: Task(2, TaskState.DELETED, "old", "now", "created")},
+        active={1: task(1, TaskState.TODO, "active")},
+        deleted={2: task(2, TaskState.DELETED, "old")},
     )
 
     result = restore_tasks(base_config(todo=1), board, ["2"])
@@ -133,8 +140,8 @@ def test_batch_promotion_respects_wip_limit():
 def test_regress_done_respects_wip_limit():
     board = Board(
         active={
-            1: Task(1, TaskState.IN_PROGRESS, "one", "now", "before"),
-            2: Task(2, TaskState.DONE, "two", "now", "before"),
+            1: task(1, TaskState.IN_PROGRESS, "one"),
+            2: task(2, TaskState.DONE, "two"),
         }
     )
     config = base_config(wip=1)
@@ -147,11 +154,7 @@ def test_regress_done_respects_wip_limit():
 
 
 def test_regress_inprogress_returns_to_todo():
-    board = Board(
-        active={
-            1: Task(1, TaskState.IN_PROGRESS, "one", "now", "before")
-        }
-    )
+    board = Board(active={1: task(1, TaskState.IN_PROGRESS, "one")})
 
     result = regress_tasks(base_config(), board, ["1"])
 
@@ -163,8 +166,8 @@ def test_regress_inprogress_returns_to_todo():
 def test_regress_inprogress_respects_todo_limit():
     board = Board(
         active={
-            1: Task(1, TaskState.TODO, "one", "now", "before"),
-            2: Task(2, TaskState.IN_PROGRESS, "two", "now", "before"),
+            1: task(1, TaskState.TODO, "one"),
+            2: task(2, TaskState.IN_PROGRESS, "two"),
         }
     )
     config = base_config(todo=1)
@@ -179,8 +182,8 @@ def test_regress_inprogress_respects_todo_limit():
 def test_batch_regression_respects_live_todo_capacity():
     board = Board(
         active={
-            1: Task(1, TaskState.IN_PROGRESS, "one", "now", "before"),
-            2: Task(2, TaskState.IN_PROGRESS, "two", "now", "before"),
+            1: task(1, TaskState.IN_PROGRESS, "one"),
+            2: task(2, TaskState.IN_PROGRESS, "two"),
         }
     )
     config = base_config(todo=1)
