@@ -24,7 +24,7 @@ python -m pip install -e ".[dev]"
 
 ## Configuration
 
-Create a default configuration with:
+Create the default configuration with:
 
 ```bash
 clikan configure
@@ -40,6 +40,24 @@ Supported settings:
 - `limits.done`: maximum done items displayed; default `10`.
 - `limits.taskname`: maximum task text length; default `40`.
 - `repaint`: display the board after successful mutations; default `false`.
+
+Configuration selection uses this precedence:
+
+1. explicit root option `--config PATH`;
+2. `$CLIKAN_HOME/.clikan.yaml` when `CLIKAN_HOME` is set;
+3. `~/.clikan.yaml`.
+
+Use `--config` to manage independent boards from one installation:
+
+```bash
+clikan --config ~/boards/work.yaml configure
+clikan --config ~/boards/work.yaml add Fix production bug
+clikan --config ~/boards/personal.yaml configure
+clikan --config ~/boards/personal.yaml add Buy groceries
+clikan --config ~/boards/work.yaml show
+```
+
+`configure` honors the selected explicit path. For example, `~/boards/work.yaml` gets a default datastore at `~/boards/work.dat`. Relative `clikan_data` values inside a configuration file are always resolved relative to that configuration file, not the shell's current directory.
 
 ## Usage
 
@@ -91,7 +109,7 @@ tests/
   test_*.py
 ```
 
-See [`docs/architecture.md`](docs/architecture.md) for module responsibilities, domain models, task transitions, persistence format, and locking behavior.
+See [`docs/architecture.md`](docs/architecture.md) for module responsibilities, domain models, task transitions, persistence format, configuration precedence, and locking behavior.
 
 ## Development
 
