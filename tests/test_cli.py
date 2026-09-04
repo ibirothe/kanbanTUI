@@ -23,22 +23,47 @@ def test_configure_creates_default_config(runner, isolated_app_home):
     assert "Creating" in result.output
 
 
-def test_add_show_promote_regress_delete(runner, write_config):
+def test_add_show_start_todo_delete(runner, write_config):
     write_config()
 
     add_result = runner.invoke(main, ["add", "task", "one"])
     show_result = runner.invoke(main, ["show"])
-    promote_result = runner.invoke(main, ["promote", "1"])
-    regress_result = runner.invoke(main, ["regress", "1"])
+    start_result = runner.invoke(main, ["start", "1"])
+    todo_result = runner.invoke(main, ["todo", "1"])
     delete_result = runner.invoke(main, ["delete", "1"])
 
     assert add_result.exit_code == 0
-    assert "Creating new task w/ id: 1 -> task one" in add_result.output
+    assert "Added #1: task one" in add_result.output
     assert show_result.exit_code == 0
     assert "task one" in show_result.output
-    assert "Promoting task 1 to in-progress." in promote_result.output
-    assert "Regressing task 1 to todo." in regress_result.output
-    assert "Removed task 1." in delete_result.output
+    assert "Started #1." in start_result.output
+    assert "Moved #1 to TODO." in todo_result.output
+    assert "Archived #1." in delete_result.output
+
+
+def test_done_completes_task_directly(runner, write_config):
+    write_config()
+    runner.invoke(main, ["add", "finish", "me"])
+
+    result = runner.invoke(main, ["done", "1"])
+    payload = json.loads(runner.invoke(main, ["show", "--format", "json"]).output)
+
+    assert result.exit_code == 0
+    assert "Completed #1." in result.output
+    assert payload["tasks"][0]["state"] == "done"
+
+
+def test_legacy_relative_transition_commands_remain_available(runner, write_config):
+    write_config()
+    runner.invoke(main, ["add", "task"])
+
+    promote_result = runner.invoke(main, ["promote", "1"])
+    regress_result = runner.invoke(main, ["regress", "1"])
+
+    assert promote_result.exit_code == 0
+    assert promote_result.output == "Started #1.\n"
+    assert regress_result.exit_code == 0
+    assert regress_result.output == "Moved #1 to TODO.\n"
 
 
 def test_add_unquoted_words_create_one_task(runner, write_config):
@@ -48,7 +73,7 @@ def test_add_unquoted_words_create_one_task(runner, write_config):
     show_result = runner.invoke(main, ["show"])
 
     assert result.exit_code == 0
-    assert "Creating new task w/ id: 1 -> Fix login bug" in result.output
+    assert "Added #1: Fix login bug" in result.output
     assert "[1] Fix login bug" in show_result.output
     assert "[2]" not in show_result.output
 
@@ -56,13 +81,13 @@ def test_add_unquoted_words_create_one_task(runner, write_config):
 def test_edit_updates_active_task_text(runner, write_config):
     write_config()
     runner.invoke(main, ["add", "old", "text"])
-    runner.invoke(main, ["promote", "1"])
+    runner.invoke(main, ["start", "1"])
 
     edit_result = runner.invoke(main, ["edit", "1", "new", "text"])
     show_result = runner.invoke(main, ["show"])
 
     assert edit_result.exit_code == 0
-    assert "Updated task 1 -> new text" in edit_result.output
+    assert "Updated #1: new text" in edit_result.output
     assert "new text" in show_result.output
     assert "in-progress" in show_result.output
 
@@ -75,7 +100,7 @@ def test_edit_deleted_task_is_rejected(runner, write_config):
     result = runner.invoke(main, ["edit", "1", "new"])
 
     assert result.exit_code == 1
-    assert "Can not edit deleted task 1." in result.output
+    assert "Error: archived task #1 cannot be edited." in result.output
 
 
 def test_history_lists_deleted_tasks_and_restore_recovers_them(runner, write_config):
@@ -91,7 +116,7 @@ def test_history_lists_deleted_tasks_and_restore_recovers_them(runner, write_con
     assert "recover me" in history_result.output
     assert "deleted / modified" in history_result.output
     assert restore_result.exit_code == 0
-    assert "Restored task 1 to todo." in restore_result.output
+    assert "Restored #1 to TODO." in restore_result.output
     assert "[1] recover me" in show_result.output
 
 
@@ -104,18 +129,25 @@ def test_restore_respects_todo_limit(runner, write_config):
     result = runner.invoke(main, ["restore", "1"])
 
     assert result.exit_code == 1
-    assert "Can not restore, todo limit of 1 reached." in result.output
+    assert "Error: TODO limit reached (1/1)." in result.output
 
 
-def test_unique_command_prefixes_are_supported(runner, write_config):
+def test_unique_command_prefixes_are_supported_when_unambiguous(runner, write_config):
     write_config()
 
     assert runner.invoke(main, ["a", "task"]).exit_code == 0
-    assert "task" in runner.invoke(main, ["s"]).output
-    assert "Promoting task 1 to in-progress." in runner.invoke(
-        main, ["p", "1"]
-    ).output
-    assert "Removed task 1." in runner.invoke(main, ["d", "1"]).output
+    assert "task" in runner.invoke(main, ["sh"]).output
+    assert "Started #1." in runner.invoke(main, ["st", "1"]).output
+    assert "Archived #1." in runner.invoke(main, ["de", "1"]).output
+
+
+def test_ambiguous_command_prefix_is_rejected(runner, write_config):
+    write_config()
+
+    result = runner.invoke(main, ["d", "1"])
+
+    assert result.exit_code != 0
+    assert "Too many matches" in result.output
 
 
 def test_taskname_limit_returns_failure(runner, write_config):
@@ -124,7 +156,7 @@ def test_taskname_limit_returns_failure(runner, write_config):
     result = runner.invoke(main, ["add", "too", "long"])
 
     assert result.exit_code == 1
-    assert "Brevity counts:" in result.output
+    assert "Error: task text exceeds limit (8/5 characters)." in result.output
 
 
 def test_empty_task_text_returns_failure(runner, write_config):
@@ -133,7 +165,7 @@ def test_empty_task_text_returns_failure(runner, write_config):
     result = runner.invoke(main, ["add", "   "])
 
     assert result.exit_code == 1
-    assert "Task text cannot be empty." in result.output
+    assert "Error: task text cannot be empty." in result.output
 
 
 def test_missing_operands_use_click_usage_errors(runner, write_config):
@@ -141,7 +173,9 @@ def test_missing_operands_use_click_usage_errors(runner, write_config):
 
     assert runner.invoke(main, ["add"]).exit_code == 2
     assert runner.invoke(main, ["edit", "1"]).exit_code == 2
-    assert runner.invoke(main, ["promote"]).exit_code == 2
+    assert runner.invoke(main, ["start"]).exit_code == 2
+    assert runner.invoke(main, ["done"]).exit_code == 2
+    assert runner.invoke(main, ["todo"]).exit_code == 2
     assert runner.invoke(main, ["restore"]).exit_code == 2
     assert runner.invoke(main, ["move", "1"]).exit_code == 2
 
@@ -162,7 +196,7 @@ def test_invalid_task_id_returns_failure(runner, write_config):
     result = runner.invoke(main, ["regress", "abc"])
 
     assert result.exit_code == 1
-    assert "Invalid task id" in result.output
+    assert "Error: invalid task ID 'abc'." in result.output
 
 
 def test_unknown_task_id_returns_failure(runner, write_config):
@@ -171,7 +205,7 @@ def test_unknown_task_id_returns_failure(runner, write_config):
     result = runner.invoke(main, ["promote", "99"])
 
     assert result.exit_code == 1
-    assert "No existing task with that id: 99" in result.output
+    assert "Error: task #99 does not exist." in result.output
 
 
 def test_mixed_batch_returns_failure_if_any_item_fails(runner, write_config):
@@ -179,11 +213,11 @@ def test_mixed_batch_returns_failure_if_any_item_fails(runner, write_config):
     runner.invoke(main, ["add", "one"])
     runner.invoke(main, ["add", "two"])
 
-    result = runner.invoke(main, ["promote", "1", "2"])
+    result = runner.invoke(main, ["start", "1", "2"])
 
     assert result.exit_code == 1
-    assert "Promoting task 1 to in-progress." in result.output
-    assert "Can not promote, in-progress limit of 1 reached." in result.output
+    assert "Started #1." in result.output
+    assert "Error: WIP limit reached (1/1)." in result.output
 
 
 def test_move_reorders_tasks_and_persists_across_show(runner, write_config):
@@ -197,7 +231,7 @@ def test_move_reorders_tasks_and_persists_across_show(runner, write_config):
     payload = json.loads(show_result.output)
 
     assert move_result.exit_code == 0
-    assert "Moved task 3 top." in move_result.output
+    assert "Moved #3 to top." in move_result.output
     assert [item["id"] for item in payload["tasks"]] == [3, 1, 2]
 
 
