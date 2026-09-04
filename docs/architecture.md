@@ -5,26 +5,27 @@
 Production code lives under `src/kanban_tui/`.
 
 - `__init__.py` — package version lookup.
-- `cli.py` — Click command definitions, command-prefix handling, global config selection, and user-facing wiring.
-- `config.py` — config path resolution, YAML parsing, defaults, and validation.
+- `cli.py` — Click command definitions, global board/config selection, and user-facing wiring.
+- `config.py` — config path resolution, named-board paths, YAML parsing/writing, defaults, validation, and supported config edits.
 - `models.py` — typed domain models: `TaskState`, `Task`, `Limits`, `AppConfig`, and `Board`.
 - `services.py` — task creation, deletion, editing, state transitions, ordering, and board business rules.
 - `storage.py` — datastore locking, YAML deserialization/serialization, and atomic writes.
 - `rendering.py` — Rich, plain, JSON, filtering, sorting, and history rendering.
 - `tui.py` — Textual full-screen interface that reuses the same config, services, storage, and rendering helpers.
 
-Tests live under `tests/` and mirror these responsibilities where practical. Shared temporary-home/config fixtures live in `tests/conftest.py`; explicit multi-board behavior is covered separately in `tests/test_multiboard.py`, and Textual behavior is exercised headlessly in `tests/test_tui.py`.
+Tests live under `tests/` and mirror these responsibilities where practical. Shared temporary-home/config fixtures live in `tests/conftest.py`; explicit multi-board behavior is covered in `tests/test_multiboard.py` and `tests/test_board_config_cli.py`, and Textual behavior is exercised headlessly in `tests/test_tui.py`.
 
 ## Runtime flow
 
 For mutating commands and TUI actions:
 
-1. The selected configuration is loaded and validated into `AppConfig`.
-2. An exclusive datastore writer lock is acquired in `storage.py`.
-3. YAML is read and converted into a typed `Board`.
-4. `services.py` applies the requested operation and returns a structured result containing messages plus success/failure counts.
-5. Successful mutations serialize the board and atomically replace the datastore.
-6. The CLI prints service messages or the TUI refreshes the live board; failed requested operations remain non-zero in CLI mode.
+1. The root command resolves the selected default, named, or explicit configuration path.
+2. `config.py` loads and validates it into `AppConfig`.
+3. An exclusive datastore writer lock is acquired in `storage.py`.
+4. YAML is read and converted into a typed `Board`.
+5. `services.py` applies the requested operation and returns a structured result containing messages plus success/failure counts.
+6. Successful mutations serialize the board and atomically replace the datastore.
+7. The CLI prints service messages or the TUI refreshes the live board; failed requested operations remain non-zero in CLI mode.
 
 `show`, `history`, and normal TUI reads are read-only and do not acquire the writer lock. Atomic datastore replacement means readers observe either the previous complete file or the new complete file. Showing a board whose datastore does not yet exist returns an empty board without creating a file; the first mutating command initializes persistence.
 
@@ -57,20 +58,23 @@ Within TODO and IN PROGRESS, rendering uses `(position, id)` ordering. Reorderin
 
 ## Configuration and board selection
 
-Configuration selection is deterministic and has one precedence order:
+The application has three configuration-selection modes:
 
-1. explicit root option `--config PATH`;
-2. `$KANBAN_TUI_HOME/.kanban-tui.yaml` when `KANBAN_TUI_HOME` is set;
-3. `~/.kanban-tui.yaml`.
+1. `--config PATH` selects an explicit YAML file.
+2. `--board NAME` selects `$KANBAN_TUI_HOME/boards/<name>.yaml`.
+3. With neither option, `$KANBAN_TUI_HOME/.kanban-tui.yaml` is used when the environment variable is set; otherwise `~/.kanban-tui.yaml` is used.
 
-The root option applies to every subcommand, including `configure`, `show`, mutations, `history`, and `tui`. This allows multiple independent boards without mutating environment variables:
+`--config` and `--board` are mutually exclusive. The selected path applies to every command, including `configure`, `config`, `show`, mutations, `history`, and `tui`.
 
-```text
-kanban-tui --config ~/boards/work.yaml show
-kanban-tui --config ~/boards/personal.yaml add Buy groceries
-```
+Named board names are normalized to lowercase and restricted to a safe slug alphabet. `board create NAME` creates the board config and matching default `.dat` path; `board list` enumerates named boards and marks the currently selected path when it is part of the list.
 
-`kanban-tui --config PATH configure` creates the selected configuration path and uses the same basename with `.dat` as its default datastore. For example, `/home/user/boards/work.yaml` defaults to `/home/user/boards/work.dat`.
+The `config` command group exposes supported settings without requiring direct YAML editing:
+
+- `config path` prints the selected YAML path.
+- `config show` prints normalized values.
+- `config set KEY VALUE` edits supported keys, validates the complete resulting document, and atomically replaces the config file.
+
+Config edits preserve unrelated YAML fields. Optional TODO/WIP limits may be cleared with `unlimited`; other limits remain required non-negative integers.
 
 Supported configuration values:
 
@@ -87,7 +91,7 @@ Supported configuration values:
 - `~` is expanded using the user's home directory;
 - relative paths are resolved relative to the directory containing the selected configuration file, never relative to the shell's current working directory.
 
-Default `kanban-tui configure` creates a missing `KANBAN_TUI_HOME` directory when necessary and writes a minimal configuration. An example lives at `examples/kanban-tui.yaml`. Missing datastore parent directories are created when a writer first initializes the board.
+Config-file writes use a temporary sibling file, flush and `fsync`, and then `os.replace()` so config editing has the same atomic-replacement property as board persistence.
 
 ## Datastore format and timestamps
 
