@@ -1,11 +1,9 @@
-from rich import print
 from rich.console import Console
 from rich.table import Table
 import click
 from click_default_group import DefaultGroup
 import yaml
 import os
-import sys
 from textwrap import wrap
 import collections
 import datetime
@@ -94,15 +92,125 @@ def read_config(ctx, param, value):
     return value
 
 
+def validate_config(config, config_path):
+    """Validate and normalize the application configuration."""
+    if not isinstance(config, dict):
+        raise click.ClickException(
+            'Config file %s must contain a YAML mapping.' % config_path
+        )
+
+    clikan_data = config.get('clikan_data')
+    if not isinstance(clikan_data, str) or not clikan_data.strip():
+        raise click.ClickException(
+            'Config file %s must define a non-empty clikan_data path.'
+            % config_path
+        )
+
+    limits = config.get('limits', {})
+    if limits is None:
+        limits = {}
+    if not isinstance(limits, dict):
+        raise click.ClickException(
+            'Config file %s: limits must be a mapping.' % config_path
+        )
+
+    for name in ('todo', 'wip', 'done', 'taskname'):
+        if name not in limits:
+            continue
+        value = limits[name]
+        if isinstance(value, bool):
+            raise click.ClickException(
+                'Config file %s: limits.%s must be a non-negative integer.'
+                % (config_path, name)
+            )
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            raise click.ClickException(
+                'Config file %s: limits.%s must be a non-negative integer.'
+                % (config_path, name)
+            )
+        if value < 0:
+            raise click.ClickException(
+                'Config file %s: limits.%s must be a non-negative integer.'
+                % (config_path, name)
+            )
+        limits[name] = value
+
+    repaint = config.get('repaint', False)
+    if not isinstance(repaint, bool):
+        raise click.ClickException(
+            'Config file %s: repaint must be true or false.' % config_path
+        )
+
+    limits.setdefault('taskname', 40)
+    limits.setdefault('done', 10)
+    config['limits'] = limits
+    config['repaint'] = repaint
+    return config
+
+
+def validate_task_collection(tasks, collection_name, data_path, allowed_states):
+    """Validate one task mapping in the datastore."""
+    if not isinstance(tasks, dict):
+        raise click.ClickException(
+            'Datastore %s: %s must be a mapping.'
+            % (data_path, collection_name)
+        )
+
+    for task_id, item in tasks.items():
+        if not isinstance(task_id, int) or isinstance(task_id, bool) or task_id < 1:
+            raise click.ClickException(
+                'Datastore %s: task ids in %s must be positive integers.'
+                % (data_path, collection_name)
+            )
+        if not isinstance(item, list) or len(item) < 4:
+            raise click.ClickException(
+                'Datastore %s: task %s in %s has an invalid record.'
+                % (data_path, task_id, collection_name)
+            )
+        if item[0] not in allowed_states:
+            raise click.ClickException(
+                'Datastore %s: task %s in %s has unsupported state %r.'
+                % (data_path, task_id, collection_name, item[0])
+            )
+        if not isinstance(item[1], str):
+            raise click.ClickException(
+                'Datastore %s: task %s in %s must have text content.'
+                % (data_path, task_id, collection_name)
+            )
+
+
+def validate_data(data, data_path):
+    """Validate the persisted board document before command logic uses it."""
+    if not isinstance(data, dict):
+        raise click.ClickException(
+            'Datastore %s must contain a YAML mapping.' % data_path
+        )
+
+    if 'data' not in data or 'deleted' not in data:
+        raise click.ClickException(
+            'Datastore %s must contain data and deleted mappings.' % data_path
+        )
+
+    validate_task_collection(
+        data['data'], 'data', data_path, {'todo', 'inprogress', 'done'}
+    )
+    validate_task_collection(
+        data['deleted'], 'deleted', data_path, {'deleted'}
+    )
+    return data
+
+
 def wip_limit_reached(config, dd):
     """Return True when another transition into WIP would exceed its limit."""
-    if 'limits' not in config or 'wip' not in config['limits']:
+    if 'wip' not in config['limits']:
         return False
 
     wip_count = sum(
         1 for item in dd['data'].values() if item[0] == 'inprogress'
     )
-    return int(config['limits']['wip']) <= wip_count
+    return config['limits']['wip'] <= wip_count
 
 
 @click.version_option(VERSION)
@@ -120,9 +228,14 @@ def configure():
     if (os.path.exists(config_path) and not
             click.confirm('Config file exists. Do you want to overwrite?')):
         return
-    with open(config_path, 'w') as outfile:
-        conf = {'clikan_data': data_path}
-        yaml.dump(conf, outfile, default_flow_style=False)
+    try:
+        with open(config_path, 'w') as outfile:
+            conf = {'clikan_data': data_path}
+            yaml.safe_dump(conf, outfile, default_flow_style=False)
+    except OSError as exc:
+        raise click.ClickException(
+            'Could not write config file %s: %s' % (config_path, exc)
+        )
     click.echo("Creating %s" % config_path)
 
 
@@ -132,11 +245,7 @@ def add(tasks):
     """Add a tasks in todo"""
     config = read_config_yaml()
     dd = read_data(config)
-
-    if ('limits' in config and 'taskname' in config['limits']):
-        taskname_length = config['limits']['taskname']
-    else:
-        taskname_length = 40
+    taskname_length = config['limits']['taskname']
 
     for task in tasks:
         if len(task) > taskname_length:
@@ -144,8 +253,8 @@ def add(tasks):
                        % (taskname_length, task))
         else:
             todos, inprogs, dones = split_items(config, dd)
-            if ('limits' in config and 'todo' in config['limits'] and
-                    int(config['limits']['todo']) <= len(todos)):
+            if ('todo' in config['limits'] and
+                    config['limits']['todo'] <= len(todos)):
                 click.echo('No new todos, limit reached already.')
             else:
                 od = collections.OrderedDict(sorted(dd['data'].items()))
@@ -158,7 +267,7 @@ def add(tasks):
                            % (new_id, task))
 
     write_data(config, dd)
-    if ('repaint' in config and config['repaint']):
+    if config['repaint']:
         display()
 
 
@@ -184,7 +293,7 @@ def delete(ids):
             click.echo('Invalid task id')
 
     write_data(config, dd)
-    if ('repaint' in config and config['repaint']):
+    if config['repaint']:
         display()
 
 
@@ -222,7 +331,7 @@ def promote(ids):
             click.echo('Invalid task id')
 
     write_data(config, dd)
-    if ('repaint' in config and config['repaint']):
+    if config['repaint']:
         display()
 
 
@@ -258,7 +367,7 @@ def regress(ids):
             click.echo('Invalid task id')
 
     write_data(config, dd)
-    if ('repaint' in config and config['repaint']):
+    if config['repaint']:
         display()
 
 
@@ -271,10 +380,7 @@ def display():
     config = read_config_yaml()
     dd = read_data(config)
     todos, inprogs, dones = split_items(config, dd)
-    if 'limits' in config and 'done' in config['limits']:
-        dones = dones[0:int(config['limits']['done'])]
-    else:
-        dones = dones[0:10]
+    dones = dones[0:config['limits']['done']]
 
     todos = '\n'.join([str(x) for x in todos])
     inprogs = '\n'.join([str(x) for x in inprogs])
@@ -303,26 +409,40 @@ def show():
 
 
 def read_data(config):
-    """Read the existing data from the config datasource"""
+    """Read the existing data from the configured datasource."""
+    data_path = config['clikan_data']
     try:
-        with open(config["clikan_data"], 'r') as stream:
+        with open(data_path, 'r') as stream:
             try:
-                return yaml.safe_load(stream)
+                data = yaml.safe_load(stream)
             except yaml.YAMLError as exc:
-                print("Ensure %s exists, as you specified it "
-                      "as the clikan data file." % config['clikan_data'])
-                print(exc)
-    except IOError:
+                raise click.ClickException(
+                    'Datastore %s contains invalid YAML: %s'
+                    % (data_path, exc)
+                )
+    except FileNotFoundError:
         click.echo("No data, initializing data file.")
-        write_data(config, {"data": {}, "deleted": {}})
-        with open(config["clikan_data"], 'r') as stream:
-            return yaml.safe_load(stream)
+        data = {"data": {}, "deleted": {}}
+        write_data(config, data)
+        return data
+    except OSError as exc:
+        raise click.ClickException(
+            'Could not read datastore %s: %s' % (data_path, exc)
+        )
+
+    return validate_data(data, data_path)
 
 
 def write_data(config, data):
-    """Write the data to the config datasource"""
-    with open(config["clikan_data"], 'w') as outfile:
-        yaml.dump(data, outfile, default_flow_style=False)
+    """Write the data to the config datasource."""
+    data_path = config['clikan_data']
+    try:
+        with open(data_path, 'w') as outfile:
+            yaml.safe_dump(data, outfile, default_flow_style=False)
+    except OSError as exc:
+        raise click.ClickException(
+            'Could not write datastore %s: %s' % (data_path, exc)
+        )
 
 
 def get_clikan_home():
@@ -333,18 +453,24 @@ def get_clikan_home():
 
 
 def read_config_yaml():
-    """Read the app config from ~/.clikan.yaml"""
+    """Read and validate the app config from ~/.clikan.yaml."""
+    home = get_clikan_home()
+    config_path = os.path.join(home, '.clikan.yaml')
     try:
-        home = get_clikan_home()
-        with open(home + "/.clikan.yaml", 'r') as stream:
+        with open(config_path, 'r') as stream:
             try:
-                return yaml.safe_load(stream)
-            except yaml.YAMLError:
-                print("Ensure %s/.clikan.yaml is valid, expected YAML." % home)
-                sys.exit()
-    except IOError:
-        print("Ensure %s/.clikan.yaml exists and is valid." % home)
-        sys.exit()
+                config = yaml.safe_load(stream)
+            except yaml.YAMLError as exc:
+                raise click.ClickException(
+                    'Config file %s contains invalid YAML: %s'
+                    % (config_path, exc)
+                )
+    except OSError as exc:
+        raise click.ClickException(
+            'Could not read config file %s: %s' % (config_path, exc)
+        )
+
+    return validate_config(config, config_path)
 
 
 def split_items(config, dd):
