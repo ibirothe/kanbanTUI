@@ -3,13 +3,25 @@ There has been a little chatter about 'personal' kanban on the tubes lately.  I 
 
 ![icon](docs/icon-256x256.png)
 
+## Requirements
+
+Python 3.11 or newer.
+
 ## Installation
 
-$ `pip install clikan`
+From a checkout of this repository:
 
-### Alternative Installation with Guix
+```bash
+python -m pip install .
+```
 
-$ `guix install clikan`
+For local development, install the project and development tools in editable mode:
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+The distribution and CLI command retain the `clikan` name for compatibility.
 
 ### Create a `.clikan.yaml` in your $HOME directory
 
@@ -82,13 +94,22 @@ This fork is maintained as a solo-development project. Changes can be committed 
 
 Run the complete test suite with:
 
-```
+```bash
 pytest
 ```
 
-The test suite automatically assigns a temporary `CLIKAN_HOME` to every command-behavior test. Tests create isolated configuration and datastore files, so running the suite does not read or modify your real `~/.clikan.yaml` or Kanban data.
+The test suite uses temporary `CLIKAN_HOME` locations and isolated configuration/datastore files, so it does not read or modify your real `~/.clikan.yaml` or Kanban data.
 
-Am considering adding the `--config_file` feature to allow for specifying the path to the config file as well.  If this is something you're interesting in or believe would be beneficial let me know through an Github issue.
+### Build
+
+Build a wheel and source distribution with:
+
+```bash
+python -m build
+```
+
+Project metadata, runtime dependencies, the console entry point, Python compatibility, and build configuration live in `pyproject.toml`. The package version is read from `VERSION`.
+
 ## License
 
 ```
@@ -105,5 +126,4 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ## Support
 
-Github Issues
-https://github.com/ibirothe/kanbanTUI/issues
+GitHub Issues: https://github.com/ibirothe/kanbanTUI/issues
