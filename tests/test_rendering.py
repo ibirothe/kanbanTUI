@@ -5,6 +5,7 @@ from pathlib import Path
 from kanban_tui.models import AppConfig, Board, Limits, Task, TaskState
 from kanban_tui.rendering import (
     board_columns,
+    column_label,
     format_json,
     format_plain,
     split_items,
@@ -15,10 +16,10 @@ def stamp(hour: int):
     return datetime(2026, 9, 4, hour, 0, tzinfo=timezone.utc)
 
 
-def config(*, done_limit: int = 10):
+def config(*, done_limit: int = 10, todo: int | None = None, wip: int | None = None):
     return AppConfig(
         data_path=Path("/tmp/unused"),
-        limits=Limits(done=done_limit),
+        limits=Limits(done=done_limit, todo=todo, wip=wip),
     )
 
 
@@ -81,6 +82,24 @@ def test_done_limit_selects_newest_completed_tasks():
     assert dones == ["[2] newest", "[3] middle"]
 
 
+def test_column_labels_show_capacity_full_and_filtered_counts():
+    board = Board(
+        active={
+            1: task(1, TaskState.TODO, "one", 9),
+            2: task(2, TaskState.TODO, "two", 9),
+            3: task(3, TaskState.IN_PROGRESS, "doing", 10),
+            4: done(4, "done", 11),
+            5: done(5, "done older", 10),
+        }
+    )
+    cfg = config(todo=2, wip=3, done_limit=1)
+
+    assert column_label(cfg, board, TaskState.TODO) == "TODO 2/2 FULL"
+    assert column_label(cfg, board, TaskState.TODO, visible_count=1) == "TODO 2/2 FULL · 1 shown"
+    assert column_label(cfg, board, TaskState.IN_PROGRESS) == "IN PROGRESS 1/3"
+    assert column_label(cfg, board, TaskState.DONE, visible_count=1) == "DONE 1/2"
+
+
 def test_json_output_is_structured_and_deterministic():
     board = Board(
         active={
@@ -101,6 +120,47 @@ def test_json_output_is_structured_and_deterministic():
         "created_at": "2026-09-04T08:00:00+00:00",
         "modified_at": "2026-09-04T09:00:00+00:00",
     }
+
+
+def test_search_is_case_insensitive_and_state_filter_composes():
+    board = Board(
+        active={
+            1: task(1, TaskState.TODO, "Fix Login", 9),
+            2: task(2, TaskState.IN_PROGRESS, "login tests", 10),
+            3: task(3, TaskState.TODO, "docs", 11),
+        }
+    )
+
+    all_matches = json.loads(format_json(config(), board, search="LOGIN"))
+    todo_matches = json.loads(
+        format_json(
+            config(),
+            board,
+            search="login",
+            state_filter=TaskState.TODO,
+        )
+    )
+
+    assert [item["id"] for item in all_matches["tasks"]] == [1, 2]
+    assert [item["id"] for item in todo_matches["tasks"]] == [1]
+
+
+def test_explicit_sort_can_override_manual_order_without_mutating_board():
+    board = Board(
+        active={
+            8: task(8, TaskState.TODO, "manual first", 9, position=1),
+            2: task(2, TaskState.TODO, "manual second", 10, position=2),
+        }
+    )
+
+    manual = json.loads(format_json(config(), board))
+    by_id = json.loads(format_json(config(), board, sort_by="id"))
+    by_modified = json.loads(format_json(config(), board, sort_by="modified"))
+
+    assert [item["id"] for item in manual["tasks"]] == [8, 2]
+    assert [item["id"] for item in by_id["tasks"]] == [2, 8]
+    assert [item["id"] for item in by_modified["tasks"]] == [2, 8]
+    assert [task.id for task in board.ordered_tasks(TaskState.TODO)] == [8, 2]
 
 
 def test_plain_output_is_stable_color_free_and_escapes_control_text():
