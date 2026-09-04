@@ -49,7 +49,14 @@ def test_tilde_data_path_is_expanded(tmp_path):
         tmp_path / ".kanban-tui.yaml",
     )
 
-    assert config.data_path == Path("~/board.dat").expanduser()
+    assert config.data_path == Path("~/board.dat").expanduser().resolve()
+
+
+def test_data_path_cannot_point_to_config_file(tmp_path):
+    config_path = tmp_path / "board.yaml"
+
+    with pytest.raises(click.ClickException, match="must not point to the config file itself"):
+        validate_config({"data_path": str(config_path)}, config_path)
 
 
 def test_explicit_config_path_overrides_app_home(monkeypatch, tmp_path):
@@ -80,6 +87,17 @@ def test_invalid_limit_is_rejected(tmp_path):
             {
                 "data_path": str(tmp_path / ".kanban-tui.dat"),
                 "limits": {"wip": -1},
+            },
+            tmp_path / ".kanban-tui.yaml",
+        )
+
+
+def test_fractional_limit_is_rejected_instead_of_truncated(tmp_path):
+    with pytest.raises(click.ClickException, match="non-negative integer"):
+        validate_config(
+            {
+                "data_path": str(tmp_path / ".kanban-tui.dat"),
+                "limits": {"wip": 1.5},
             },
             tmp_path / ".kanban-tui.yaml",
         )
