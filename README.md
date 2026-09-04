@@ -148,9 +148,9 @@ kanban-tui undo
 
 `start`, `done`, and `todo` move tasks directly to the requested state. The older `promote` and `regress` commands remain available as one-step transition shortcuts.
 
-TODO and IN PROGRESS tasks have persistent manual ordering. Use `move <id> top`, `move <id> bottom`, `move <id> before <other-id>`, or `move <id> after <other-id>` to reprioritize a task within its current column. Completed tasks remain ordered by completion time.
+TODO and IN PROGRESS tasks have persistent manual ordering. Use `move <id> top`, `move <id> bottom`, `move <id> before <other-id>`, or `move <id> after <other-id>` to reprioritize a task within its current column. Completed tasks are ordered by the time they most recently entered DONE. Editing text, priority, or tags on a completed task does not make it appear newly completed.
 
-`add` treats all words after the command as one task description. `edit` preserves task ID, state, creation time, manual position, priority, and tags. `history` lists archived tasks, and `restore` returns archived tasks to TODO while respecting configured capacity limits.
+`add` treats all words after the command as one task description. `edit` preserves task ID, state, creation time, manual position, priority, tags, and completion time. `history` lists archived tasks, and `restore` returns archived tasks to TODO while respecting configured capacity limits.
 
 Successful mutations use short task-centric messages such as `Added #12`, `Started #12`, and `Completed #12`. Rejected operations begin with `Error:` and return a non-zero exit status. For multi-ID commands, the command returns non-zero if any requested operation fails.
 
@@ -187,14 +187,14 @@ kanban-tui show --state todo --tag bug --priority high
 
 ## Undo
 
-kanbanTUI keeps one atomic undo snapshot per board. Every successful mutation records the complete board state that existed immediately before that mutation; failed or no-op commands do not replace the snapshot.
+kanbanTUI keeps one atomic undo snapshot per board. Every successful mutation records the complete board state that existed immediately before that mutation; failed or semantic no-op commands do not replace the snapshot.
 
 ```bash
 kanban-tui add Temporary task
 kanban-tui undo
 ```
 
-Undo covers task creation, edits, metadata changes, state changes, ordering, archive/restore operations, mixed successful batches, and imports. There is intentionally one undo level: after `undo`, there is no redo snapshot.
+Undo covers task creation, edits, metadata changes, state changes, ordering, archive/restore operations, mixed successful batches, and imports. Reorder requests that already describe the current order and imports that produce no board changes leave the previous undo snapshot intact. There is intentionally one undo level: after `undo`, there is no redo snapshot.
 
 The interactive TUI exposes the same operation with `u`.
 
@@ -209,9 +209,11 @@ kanban-tui import board.json --mode merge
 kanban-tui import board.json --mode replace
 ```
 
-The versioned `kanbanTUI-board` JSON format contains every active and archived task, including IDs, states, timestamps, manual positions, priority, and tags. It is independent of the DONE display limit and `show` filters.
+The versioned `kanbanTUI-board` JSON format contains every active and archived task, including IDs, states, creation/modification/completion timestamps, manual positions, priority, and tags. It is independent of the DONE display limit and `show` filters.
 
-`merge` preserves the current board and appends imported tasks, but rejects task-ID conflicts. `replace` replaces the selected board with the imported board. Both modes validate the complete import and configured TODO/WIP capacities before writing. A successful import can be reverted with `undo`.
+`merge` preserves the current board and appends imported tasks. If an imported ID already exists in active or archived history, that imported task is deterministically assigned a fresh ID and the CLI reports the mapping, for example `#1->#8`. Non-conflicting imported IDs remain unchanged. `replace` replaces the selected board and preserves the imported IDs exactly.
+
+Both modes validate the complete import and configured TODO/WIP capacities before writing. Imports that produce no effective board changes do not write the datastore or replace the current undo snapshot. A successful mutating import can be reverted with `undo`.
 
 ## Board view and filters
 
@@ -245,10 +247,14 @@ kanban-tui show --format json
 ```
 
 - `table` is the default Rich terminal view.
-- `plain` emits deterministic tab-separated text, including priority and tags, without color codes.
-- `json` emits structured task data with timezone-aware ISO 8601 timestamps, priority, and tags.
+- `plain` emits deterministic tab-separated text, including timestamps, priority, and tags, without color codes.
+- `json` emits structured task data with timezone-aware ISO 8601 `created_at`, `modified_at`, and `completed_at` values plus priority and tags.
 
 Filters and sorting apply consistently to all three formats. All formats use the configured completed-task display limit. Rich output honors `NO_COLOR`.
+
+## Persistence behavior
+
+Reading a board is side-effect free. If the selected datastore does not exist yet, read-only commands and TUI startup see an empty board without creating a file or printing initialization messages. The datastore is created only when a mutation actually succeeds.
 
 ## Project structure
 
