@@ -13,13 +13,14 @@ def load_pyproject():
 def test_pyproject_uses_src_layout_and_console_entrypoint():
     config = load_pyproject()
 
+    assert config["project"]["name"] == "kanbanTUI"
     assert config["project"]["requires-python"] == ">=3.11"
-    assert config["project"]["scripts"]["clikan"] == "kanban_tui.cli:clikan"
+    assert config["project"]["scripts"]["kanban-tui"] == "kanban_tui.cli:main"
     assert config["tool"]["setuptools"]["packages"]["find"]["where"] == ["src"]
     assert config["tool"]["pytest"]["ini_options"]["testpaths"] == ["tests"]
 
 
-def test_modern_packaging_files_are_authoritative():
+def test_local_project_configuration_is_authoritative():
     config = load_pyproject()
 
     assert config["build-system"]["build-backend"] == "setuptools.build_meta"
