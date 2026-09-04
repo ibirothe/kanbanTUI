@@ -9,10 +9,10 @@ STAMP = datetime(2026, 9, 4, 10, 0, tzinfo=timezone.utc)
 EARLIER = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
 
 
-def test_legacy_timestamps_are_parsed_and_normalized_to_iso():
+def test_legacy_timestamps_and_records_are_normalized():
     raw = {
         "data": {
-            1: [
+            3: [
                 "todo",
                 "task",
                 "2026-Sep-04 10:00:00",
@@ -25,13 +25,15 @@ def test_legacy_timestamps_are_parsed_and_normalized_to_iso():
     board = Board.from_mapping(raw)
     serialized = board.to_mapping()
 
-    assert board.active[1].modified_at.tzinfo is not None
-    assert board.active[1].created_at.tzinfo is not None
-    assert parse_timestamp(serialized["data"][1][2]).tzinfo is not None
-    assert "T" in serialized["data"][1][2]
+    assert board.active[3].modified_at.tzinfo is not None
+    assert board.active[3].created_at.tzinfo is not None
+    assert board.active[3].position == 3
+    assert parse_timestamp(serialized["data"][3][2]).tzinfo is not None
+    assert "T" in serialized["data"][3][2]
+    assert serialized["data"][3][4] == 3
 
 
-def test_iso_timestamp_round_trip_is_stable():
+def test_iso_timestamp_and_position_round_trip_is_stable():
     raw = {
         "data": {
             1: [
@@ -39,6 +41,7 @@ def test_iso_timestamp_round_trip_is_stable():
                 "task",
                 "2026-09-04T10:00:00+00:00",
                 "2026-09-04T09:00:00+00:00",
+                4,
             ]
         },
         "deleted": {
@@ -47,6 +50,7 @@ def test_iso_timestamp_round_trip_is_stable():
                 "old",
                 "2026-09-04T10:00:00+00:00",
                 "2026-09-04T09:00:00+00:00",
+                2,
             ]
         },
     }
@@ -59,9 +63,22 @@ def test_iso_timestamp_round_trip_is_stable():
         text="task",
         modified_at=STAMP,
         created_at=EARLIER,
+        position=4,
     )
     assert board.deleted[2].state is TaskState.DELETED
     assert board.to_mapping() == raw
+
+
+def test_active_manual_order_uses_position_then_id():
+    board = Board(
+        active={
+            1: Task(1, TaskState.TODO, "one", STAMP, EARLIER, position=2),
+            2: Task(2, TaskState.TODO, "two", STAMP, EARLIER, position=1),
+            3: Task(3, TaskState.TODO, "three", STAMP, EARLIER, position=2),
+        }
+    )
+
+    assert [task.id for task in board.ordered_tasks(TaskState.TODO)] == [2, 1, 3]
 
 
 def test_invalid_task_state_is_rejected():
@@ -86,6 +103,24 @@ def test_invalid_timestamp_is_rejected():
         Board.from_mapping(
             {
                 "data": {1: ["todo", "task", "not-a-time", "also-not-a-time"]},
+                "deleted": {},
+            }
+        )
+
+
+def test_invalid_position_is_rejected():
+    with pytest.raises(ValueError, match="invalid position"):
+        Board.from_mapping(
+            {
+                "data": {
+                    1: [
+                        "todo",
+                        "task",
+                        "2026-09-04T10:00:00+00:00",
+                        "2026-09-04T09:00:00+00:00",
+                        0,
+                    ]
+                },
                 "deleted": {},
             }
         )
