@@ -1,6 +1,27 @@
 import datetime
+from collections.abc import Iterable
+from dataclasses import dataclass, field
 
 from .models import AppConfig, Board, Task, TaskState
+
+
+@dataclass
+class OperationResult:
+    messages: list[str] = field(default_factory=list)
+    succeeded: int = 0
+    failed: int = 0
+
+    @property
+    def ok(self) -> bool:
+        return self.failed == 0
+
+    def success(self, message: str) -> None:
+        self.succeeded += 1
+        self.messages.append(message)
+
+    def failure(self, message: str) -> None:
+        self.failed += 1
+        self.messages.append(message)
 
 
 def timestamp() -> str:
@@ -32,19 +53,30 @@ def todo_limit_reached(config: AppConfig, board: Board) -> bool:
     return state_limit_reached(config, board, TaskState.TODO)
 
 
-def add_tasks(config: AppConfig, board: Board, tasks):
-    messages = []
+def _normalize_task_text(text: str) -> str:
+    return text.strip()
 
-    for text in tasks:
+
+def add_tasks(
+    config: AppConfig, board: Board, tasks: Iterable[str]
+) -> OperationResult:
+    result = OperationResult()
+
+    for raw_text in tasks:
+        text = _normalize_task_text(raw_text)
+        if not text:
+            result.failure("Task text cannot be empty.")
+            continue
+
         if len(text) > config.limits.taskname:
-            messages.append(
+            result.failure(
                 "Task must be at most %s chars, Brevity counts: %s"
                 % (config.limits.taskname, text)
             )
             continue
 
         if todo_limit_reached(config, board):
-            messages.append("No new todos, limit reached already.")
+            result.failure("No new todos, limit reached already.")
             continue
 
         task_id = board.next_task_id()
@@ -56,99 +88,103 @@ def add_tasks(config: AppConfig, board: Board, tasks):
             modified_at=now,
             created_at=now,
         )
-        messages.append("Creating new task w/ id: %d -> %s" % (task_id, text))
+        result.success("Creating new task w/ id: %d -> %s" % (task_id, text))
 
-    return messages
+    return result
 
 
-def delete_tasks(board: Board, ids):
-    messages = []
+def delete_tasks(board: Board, ids: Iterable[str]) -> OperationResult:
+    result = OperationResult()
     for task_id in ids:
         try:
             numeric_id = int(task_id)
-        except ValueError:
-            messages.append("Invalid task id")
+        except (TypeError, ValueError):
+            result.failure("Invalid task id")
             continue
 
         task = board.active.get(numeric_id)
         if task is None:
-            messages.append("No existing task with that id: %d" % numeric_id)
+            result.failure("No existing task with that id: %d" % numeric_id)
             continue
 
         task.state = TaskState.DELETED
         task.modified_at = timestamp()
         board.deleted[numeric_id] = task
         board.active.pop(numeric_id)
-        messages.append("Removed task %d." % numeric_id)
+        result.success("Removed task %d." % numeric_id)
 
-    return messages
+    return result
 
 
-def promote_tasks(config: AppConfig, board: Board, ids):
-    messages = []
+def promote_tasks(
+    config: AppConfig, board: Board, ids: Iterable[str]
+) -> OperationResult:
+    result = OperationResult()
     for task_id in ids:
         try:
             numeric_id = int(task_id)
-        except ValueError:
-            messages.append("Invalid task id")
+        except (TypeError, ValueError):
+            result.failure("Invalid task id")
             continue
 
         task = board.active.get(numeric_id)
         if task is None:
-            messages.append("No existing task with that id: %s" % task_id)
+            result.failure("No existing task with that id: %s" % task_id)
         elif task.state is TaskState.TODO:
             if wip_limit_reached(config, board):
-                messages.append(
+                result.failure(
                     "Can not promote, in-progress limit of %s reached."
                     % config.limits.wip
                 )
             else:
                 task.state = TaskState.IN_PROGRESS
                 task.modified_at = timestamp()
-                messages.append("Promoting task %s to in-progress." % task_id)
+                result.success("Promoting task %s to in-progress." % task_id)
         elif task.state is TaskState.IN_PROGRESS:
             task.state = TaskState.DONE
             task.modified_at = timestamp()
-            messages.append("Promoting task %s to done." % task_id)
+            result.success("Promoting task %s to done." % task_id)
         else:
-            messages.append("Can not promote %s, already done." % task_id)
+            result.failure("Can not promote %s, already done." % task_id)
 
-    return messages
+    return result
 
 
-def regress_tasks(config: AppConfig, board: Board, ids):
-    messages = []
+def regress_tasks(
+    config: AppConfig, board: Board, ids: Iterable[str]
+) -> OperationResult:
+    result = OperationResult()
     for task_id in ids:
         try:
             numeric_id = int(task_id)
-        except ValueError:
-            messages.append("Invalid task id")
+        except (TypeError, ValueError):
+            result.failure("Invalid task id")
             continue
 
         task = board.active.get(numeric_id)
         if task is None:
-            messages.append("No existing task with id: %s" % task_id)
+            result.failure("No existing task with id: %s" % task_id)
         elif task.state is TaskState.DONE:
             if wip_limit_reached(config, board):
-                messages.append(
+                result.failure(
                     "Can not regress, in-progress limit of %s reached."
                     % config.limits.wip
                 )
             else:
                 task.state = TaskState.IN_PROGRESS
                 task.modified_at = timestamp()
-                messages.append("Regressing task %s to in-progress." % task_id)
+                result.success("Regressing task %s to in-progress." % task_id)
         elif task.state is TaskState.IN_PROGRESS:
             if todo_limit_reached(config, board):
-                messages.append(
+                result.failure(
                     "Can not regress, todo limit of %s reached."
                     % config.limits.todo
                 )
             else:
                 task.state = TaskState.TODO
                 task.modified_at = timestamp()
-                messages.append("Regressing task %s to todo." % task_id)
+                result.success("Regressing task %s to todo." % task_id)
         else:
-            messages.append("Already in todo, can not regress %s" % task_id)
+            result.failure("Already in todo, can not regress %s" % task_id)
 
-    return messages
+    return result
