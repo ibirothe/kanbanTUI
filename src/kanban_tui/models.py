@@ -8,6 +8,7 @@ from typing import Any
 
 LEGACY_TIMESTAMP_FORMAT = "%Y-%b-%d %H:%M:%S"
 TAG_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
+INTEGER_PATTERN = re.compile(r"[0-9]+")
 
 
 def parse_timestamp(value: Any) -> datetime:
@@ -49,6 +50,20 @@ def normalize_tag(value: str) -> str:
     return normalized
 
 
+def _strict_integer(value: Any, *, minimum: int, error: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(error)
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str) and INTEGER_PATTERN.fullmatch(value.strip()):
+        parsed = int(value.strip())
+    else:
+        raise ValueError(error)
+    if parsed < minimum:
+        raise ValueError(error)
+    return parsed
+
+
 class TaskState(str, Enum):
     TODO = "todo"
     IN_PROGRESS = "inprogress"
@@ -76,6 +91,19 @@ class Task:
     completed_at: datetime | None = None
 
     def __post_init__(self) -> None:
+        self.id = _strict_integer(
+            self.id,
+            minimum=1,
+            error="task id must be a positive integer",
+        )
+        if not isinstance(self.state, TaskState):
+            try:
+                self.state = TaskState(self.state)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("task state is invalid") from exc
+        if not isinstance(self.text, str) or not self.text.strip():
+            raise ValueError("task text cannot be empty")
+
         self.modified_at = parse_timestamp(self.modified_at)
         self.created_at = parse_timestamp(self.created_at)
         if self.completed_at is not None:
@@ -84,12 +112,19 @@ class Task:
             # Legacy records used modified_at as the completion timestamp.
             self.completed_at = self.modified_at
 
-        if isinstance(self.position, bool) or not isinstance(self.position, int):
-            raise ValueError("task position must be a non-negative integer")
-        if self.position < 0:
-            raise ValueError("task position must be a non-negative integer")
-        if self.position == 0:
-            self.position = self.id
+        if (
+            self.state in {TaskState.TODO, TaskState.IN_PROGRESS}
+            and self.completed_at is not None
+        ):
+            raise ValueError(
+                "TODO and IN PROGRESS tasks cannot have a completion timestamp"
+            )
+
+        self.position = _strict_integer(
+            self.position if self.position != 0 else self.id,
+            minimum=1,
+            error="task position must be a positive integer",
+        )
 
         if self.priority is not None and not isinstance(self.priority, TaskPriority):
             try:
@@ -103,18 +138,24 @@ class Task:
 
     @classmethod
     def from_record(cls, task_id: int, record: Any, *, deleted: bool = False) -> "Task":
-        if not isinstance(task_id, int) or isinstance(task_id, bool) or task_id < 1:
-            raise ValueError("task ids must be positive integers")
+        try:
+            normalized_id = _strict_integer(
+                task_id,
+                minimum=1,
+                error="task ids must be positive integers",
+            )
+        except ValueError as exc:
+            raise ValueError("task ids must be positive integers") from exc
         if not isinstance(record, list) or len(record) < 4:
-            raise ValueError(f"task {task_id} has an invalid record")
-        if not isinstance(record[1], str):
-            raise ValueError(f"task {task_id} must have text content")
+            raise ValueError(f"task {normalized_id} has an invalid record")
+        if not isinstance(record[1], str) or not record[1].strip():
+            raise ValueError(f"task {normalized_id} must have non-empty text content")
 
         try:
             state = TaskState(record[0])
         except ValueError as exc:
             raise ValueError(
-                f"task {task_id} has unsupported state {record[0]!r}"
+                f"task {normalized_id} has unsupported state {record[0]!r}"
             ) from exc
 
         allowed = (
@@ -127,25 +168,28 @@ class Task:
             }
         )
         if state not in allowed:
-            raise ValueError(f"task {task_id} has invalid state {state.value!r}")
+            raise ValueError(f"task {normalized_id} has invalid state {state.value!r}")
 
         try:
             modified_at = parse_timestamp(record[2])
             created_at = parse_timestamp(record[3])
         except ValueError as exc:
-            raise ValueError(f"task {task_id} has an invalid timestamp: {exc}") from exc
+            raise ValueError(
+                f"task {normalized_id} has an invalid timestamp: {exc}"
+            ) from exc
 
-        position = task_id
+        position = normalized_id
         if len(record) >= 5:
-            raw_position = record[4]
-            if isinstance(raw_position, bool):
-                raise ValueError(f"task {task_id} has an invalid position")
             try:
-                position = int(raw_position)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f"task {task_id} has an invalid position") from exc
-            if position < 1:
-                raise ValueError(f"task {task_id} has an invalid position")
+                position = _strict_integer(
+                    record[4],
+                    minimum=1,
+                    error=f"task {normalized_id} has an invalid position",
+                )
+            except ValueError as exc:
+                raise ValueError(
+                    f"task {normalized_id} has an invalid position"
+                ) from exc
 
         priority: TaskPriority | None = None
         tags: tuple[str, ...] = ()
@@ -155,22 +199,26 @@ class Task:
             if metadata is None:
                 metadata = {}
             if not isinstance(metadata, dict):
-                raise ValueError(f"task {task_id} metadata must be a mapping")
+                raise ValueError(f"task {normalized_id} metadata must be a mapping")
 
             raw_priority = metadata.get("priority")
             if raw_priority is not None:
                 try:
                     priority = TaskPriority(raw_priority)
                 except (TypeError, ValueError) as exc:
-                    raise ValueError(f"task {task_id} has an invalid priority") from exc
+                    raise ValueError(
+                        f"task {normalized_id} has an invalid priority"
+                    ) from exc
 
             raw_tags = metadata.get("tags", [])
             if not isinstance(raw_tags, list):
-                raise ValueError(f"task {task_id} tags must be a list")
+                raise ValueError(f"task {normalized_id} tags must be a list")
             try:
                 tags = tuple(sorted({normalize_tag(tag) for tag in raw_tags}))
             except ValueError as exc:
-                raise ValueError(f"task {task_id} has invalid tags: {exc}") from exc
+                raise ValueError(
+                    f"task {normalized_id} has invalid tags: {exc}"
+                ) from exc
 
             raw_completed_at = metadata.get("completed_at")
             if raw_completed_at is not None:
@@ -178,11 +226,11 @@ class Task:
                     completed_at = parse_timestamp(raw_completed_at)
                 except ValueError as exc:
                     raise ValueError(
-                        f"task {task_id} has an invalid completion timestamp: {exc}"
+                        f"task {normalized_id} has an invalid completion timestamp: {exc}"
                     ) from exc
 
         return cls(
-            id=task_id,
+            id=normalized_id,
             state=state,
             text=record[1],
             modified_at=modified_at,
@@ -236,18 +284,16 @@ class Limits:
         for name in values:
             if name not in raw:
                 continue
-            value = raw[name]
-            if isinstance(value, bool):
-                raise ValueError(f"limits.{name} must be a non-negative integer")
             try:
-                normalized = int(value)
-            except (TypeError, ValueError) as exc:
+                values[name] = _strict_integer(
+                    raw[name],
+                    minimum=0,
+                    error=f"limits.{name} must be a non-negative integer",
+                )
+            except ValueError as exc:
                 raise ValueError(
                     f"limits.{name} must be a non-negative integer"
                 ) from exc
-            if normalized < 0:
-                raise ValueError(f"limits.{name} must be a non-negative integer")
-            values[name] = normalized
 
         return cls(**values)
 
