@@ -1,10 +1,12 @@
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 import click
 import pytest
 
 from kanban_tui.cli import main
+from kanban_tui.config import get_config_path
 from kanban_tui.models import Board, Task, TaskState
 from kanban_tui.storage import read_data
 from kanban_tui.transfer import (
@@ -15,6 +17,7 @@ from kanban_tui.transfer import (
     merge_boards,
     read_export,
     validate_board_capacity,
+    validate_imported_tasks,
     write_export,
 )
 
@@ -99,6 +102,35 @@ def test_invalid_export_format_and_duplicate_ids_are_rejected():
         board_from_export(payload)
 
 
+def test_import_rejects_empty_task_text_and_inconsistent_completion_state():
+    base = {
+        "id": 1,
+        "state": "todo",
+        "text": "task",
+        "created_at": EARLIER.isoformat(),
+        "modified_at": STAMP.isoformat(),
+        "position": 1,
+    }
+
+    empty_text = {
+        "format": EXPORT_FORMAT,
+        "version": EXPORT_VERSION,
+        "active": [{**base, "text": "   "}],
+        "archived": [],
+    }
+    with pytest.raises(ValueError, match="text cannot be empty"):
+        board_from_export(empty_text)
+
+    inconsistent_completion = {
+        "format": EXPORT_FORMAT,
+        "version": EXPORT_VERSION,
+        "active": [{**base, "completed_at": STAMP.isoformat()}],
+        "archived": [],
+    }
+    with pytest.raises(ValueError, match="cannot have a completion timestamp"):
+        board_from_export(inconsistent_completion)
+
+
 def test_merge_appends_tasks_and_remaps_active_and_archived_id_collisions():
     current = Board(
         active={1: task(1, TaskState.TODO, "current", position=1)},
@@ -146,6 +178,14 @@ def test_import_capacity_is_validated_before_write(write_config):
         validate_board_capacity(config, imported)
 
 
+def test_imported_task_text_must_respect_configured_limit(write_config):
+    config = write_config(limits={"taskname": 4})
+    imported = Board(active={1: task(1, TaskState.TODO, "too long")})
+
+    with pytest.raises(click.ClickException, match="text exceeds limit"):
+        validate_imported_tasks(config, imported)
+
+
 def test_write_export_requires_force_for_existing_file(tmp_path):
     path = tmp_path / "board.json"
     board = Board(active={1: task(1, TaskState.TODO, "one")})
@@ -156,6 +196,23 @@ def test_write_export_requires_force_for_existing_file(tmp_path):
 
     write_export(path, board, overwrite=True)
     assert read_export(path).active[1].text == "one"
+
+
+def test_cli_export_refuses_internal_board_files(runner, write_config):
+    config = write_config()
+    runner.invoke(main, ["add", "current"])
+    protected = [
+        get_config_path(),
+        config.data_path,
+        Path(f"{config.data_path.resolve()}.lock"),
+    ]
+
+    for path in protected:
+        result = runner.invoke(main, ["export", str(path), "--force"])
+        assert result.exit_code != 0
+        assert "reserved for the selected board" in result.output
+
+    assert read_data(config).active[1].text == "current"
 
 
 def test_cli_export_import_replace_and_undo(runner, write_config, tmp_path):
@@ -177,6 +234,21 @@ def test_cli_export_import_replace_and_undo(runner, write_config, tmp_path):
     undo_result = runner.invoke(main, ["undo"])
     assert undo_result.exit_code == 0
     assert read_data(config).active[1].text == "changed"
+
+
+def test_cli_import_rejects_overlong_task_without_mutating_board(
+    runner, write_config, tmp_path
+):
+    config = write_config(limits={"taskname": 4})
+    runner.invoke(main, ["add", "base"])
+    path = tmp_path / "too-long.json"
+    write_export(path, Board(active={2: task(2, TaskState.TODO, "too long")}))
+
+    result = runner.invoke(main, ["import", str(path), "--mode", "merge"])
+
+    assert result.exit_code != 0
+    assert "text exceeds limit" in result.output
+    assert list(read_data(config).active) == [1]
 
 
 def test_cli_import_merge_remaps_conflicting_ids(runner, write_config, tmp_path):
