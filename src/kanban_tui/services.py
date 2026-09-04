@@ -53,15 +53,27 @@ def todo_limit_reached(config: AppConfig, board: Board) -> bool:
     return state_limit_reached(config, board, TaskState.TODO)
 
 
+def _state_name(state: TaskState) -> str:
+    if state is TaskState.IN_PROGRESS:
+        return "IN PROGRESS"
+    return state.value.upper()
+
+
+def _capacity_error(config: AppConfig, board: Board, state: TaskState) -> str:
+    limit = _state_limit(config, state)
+    count = _count_state(board, state)
+    label = "WIP" if state is TaskState.IN_PROGRESS else "TODO"
+    return f"Error: {label} limit reached ({count}/{limit})."
+
+
 def _validate_task_text(config: AppConfig, raw_text: str) -> tuple[str | None, str | None]:
     text = raw_text.strip()
     if not text:
-        return None, "Task text cannot be empty."
+        return None, "Error: task text cannot be empty."
     if len(text) > config.limits.taskname:
         return (
             None,
-            "Task must be at most %s chars, Brevity counts: %s"
-            % (config.limits.taskname, text),
+            f"Error: task text exceeds limit ({len(text)}/{config.limits.taskname} characters).",
         )
     return text, None
 
@@ -70,12 +82,46 @@ def _parse_task_id(task_id: str) -> tuple[int | None, str | None]:
     try:
         return int(task_id), None
     except (TypeError, ValueError):
-        return None, "Invalid task id"
+        return None, f"Error: invalid task ID {task_id!r}."
+
+
+def _active_task(board: Board, task_id: str) -> tuple[Task | None, str | None]:
+    numeric_id, error = _parse_task_id(task_id)
+    if error is not None:
+        return None, error
+    assert numeric_id is not None
+    task = board.active.get(numeric_id)
+    if task is None:
+        return None, f"Error: task #{numeric_id} does not exist."
+    return task, None
 
 
 def _place_at_bottom(board: Board, task: Task, state: TaskState) -> None:
     task.position = board.next_position(state)
     task.state = state
+
+
+def _transition_task(
+    config: AppConfig,
+    board: Board,
+    task: Task,
+    target_state: TaskState,
+) -> str | None:
+    if task.state is target_state:
+        return f"Error: task #{task.id} is already {_state_name(target_state)}."
+    if state_limit_reached(config, board, target_state):
+        return _capacity_error(config, board, target_state)
+
+    previous_state = task.state
+    if target_state in {TaskState.TODO, TaskState.IN_PROGRESS}:
+        _place_at_bottom(board, task, target_state)
+    else:
+        task.state = target_state
+
+    if previous_state in {TaskState.TODO, TaskState.IN_PROGRESS}:
+        board.normalize_positions(previous_state)
+    task.modified_at = timestamp()
+    return None
 
 
 def add_tasks(
@@ -91,7 +137,7 @@ def add_tasks(
         assert text is not None
 
         if todo_limit_reached(config, board):
-            result.failure("No new todos, limit reached already.")
+            result.failure(_capacity_error(config, board, TaskState.TODO))
             continue
 
         task_id = board.next_task_id()
@@ -104,7 +150,7 @@ def add_tasks(
             created_at=now,
             position=board.next_position(TaskState.TODO),
         )
-        result.success("Creating new task w/ id: %d -> %s" % (task_id, text))
+        result.success(f"Added #{task_id}: {text}")
 
     return result
 
@@ -120,12 +166,12 @@ def edit_task(
     assert numeric_id is not None
 
     if numeric_id in board.deleted:
-        result.failure("Can not edit deleted task %d." % numeric_id)
+        result.failure(f"Error: archived task #{numeric_id} cannot be edited.")
         return result
 
     task = board.active.get(numeric_id)
     if task is None:
-        result.failure("No existing task with that id: %d" % numeric_id)
+        result.failure(f"Error: task #{numeric_id} does not exist.")
         return result
 
     text, error = _validate_task_text(config, raw_text)
@@ -136,31 +182,26 @@ def edit_task(
 
     task.text = text
     task.modified_at = timestamp()
-    result.success("Updated task %d -> %s" % (numeric_id, text))
+    result.success(f"Updated #{numeric_id}: {text}")
     return result
 
 
 def delete_tasks(board: Board, ids: Iterable[str]) -> OperationResult:
     result = OperationResult()
     for task_id in ids:
-        numeric_id, error = _parse_task_id(task_id)
+        task, error = _active_task(board, task_id)
         if error is not None:
             result.failure(error)
             continue
-        assert numeric_id is not None
-
-        task = board.active.get(numeric_id)
-        if task is None:
-            result.failure("No existing task with that id: %d" % numeric_id)
-            continue
+        assert task is not None
 
         previous_state = task.state
         task.state = TaskState.DELETED
         task.modified_at = timestamp()
-        board.deleted[numeric_id] = task
-        board.active.pop(numeric_id)
+        board.deleted[task.id] = task
+        board.active.pop(task.id)
         board.normalize_positions(previous_state)
-        result.success("Removed task %d." % numeric_id)
+        result.success(f"Archived #{task.id}.")
 
     return result
 
@@ -177,26 +218,53 @@ def restore_tasks(
         assert numeric_id is not None
 
         if numeric_id in board.active:
-            result.failure("Task id %d is already active." % numeric_id)
+            result.failure(f"Error: task #{numeric_id} is already active.")
             continue
 
         task = board.deleted.get(numeric_id)
         if task is None:
-            result.failure("No deleted task with that id: %d" % numeric_id)
+            result.failure(f"Error: archived task #{numeric_id} does not exist.")
             continue
 
         if todo_limit_reached(config, board):
-            result.failure(
-                "Can not restore, todo limit of %s reached." % config.limits.todo
-            )
+            result.failure(_capacity_error(config, board, TaskState.TODO))
             continue
 
         _place_at_bottom(board, task, TaskState.TODO)
         task.modified_at = timestamp()
         board.active[numeric_id] = task
         board.deleted.pop(numeric_id)
-        result.success("Restored task %d to todo." % numeric_id)
+        result.success(f"Restored #{numeric_id} to TODO.")
 
+    return result
+
+
+def move_tasks_to_state(
+    config: AppConfig,
+    board: Board,
+    ids: Iterable[str],
+    target_state: TaskState,
+) -> OperationResult:
+    """Move active tasks directly to an explicit target state."""
+    result = OperationResult()
+    for task_id in ids:
+        task, error = _active_task(board, task_id)
+        if error is not None:
+            result.failure(error)
+            continue
+        assert task is not None
+
+        error = _transition_task(config, board, task, target_state)
+        if error is not None:
+            result.failure(error)
+            continue
+
+        if target_state is TaskState.IN_PROGRESS:
+            result.success(f"Started #{task.id}.")
+        elif target_state is TaskState.DONE:
+            result.success(f"Completed #{task.id}.")
+        else:
+            result.success(f"Moved #{task.id} to TODO.")
     return result
 
 
@@ -205,33 +273,27 @@ def promote_tasks(
 ) -> OperationResult:
     result = OperationResult()
     for task_id in ids:
-        numeric_id, error = _parse_task_id(task_id)
+        task, error = _active_task(board, task_id)
         if error is not None:
             result.failure(error)
             continue
-        assert numeric_id is not None
+        assert task is not None
 
-        task = board.active.get(numeric_id)
-        if task is None:
-            result.failure("No existing task with that id: %s" % task_id)
-        elif task.state is TaskState.TODO:
-            if wip_limit_reached(config, board):
-                result.failure(
-                    "Can not promote, in-progress limit of %s reached."
-                    % config.limits.wip
-                )
-            else:
-                _place_at_bottom(board, task, TaskState.IN_PROGRESS)
-                board.normalize_positions(TaskState.TODO)
-                task.modified_at = timestamp()
-                result.success("Promoting task %s to in-progress." % task_id)
+        if task.state is TaskState.TODO:
+            target_state = TaskState.IN_PROGRESS
+            success_message = f"Started #{task.id}."
         elif task.state is TaskState.IN_PROGRESS:
-            task.state = TaskState.DONE
-            board.normalize_positions(TaskState.IN_PROGRESS)
-            task.modified_at = timestamp()
-            result.success("Promoting task %s to done." % task_id)
+            target_state = TaskState.DONE
+            success_message = f"Completed #{task.id}."
         else:
-            result.failure("Can not promote %s, already done." % task_id)
+            result.failure(f"Error: task #{task.id} is already DONE.")
+            continue
+
+        error = _transition_task(config, board, task, target_state)
+        if error is not None:
+            result.failure(error)
+        else:
+            result.success(success_message)
 
     return result
 
@@ -241,38 +303,27 @@ def regress_tasks(
 ) -> OperationResult:
     result = OperationResult()
     for task_id in ids:
-        numeric_id, error = _parse_task_id(task_id)
+        task, error = _active_task(board, task_id)
         if error is not None:
             result.failure(error)
             continue
-        assert numeric_id is not None
+        assert task is not None
 
-        task = board.active.get(numeric_id)
-        if task is None:
-            result.failure("No existing task with id: %s" % task_id)
-        elif task.state is TaskState.DONE:
-            if wip_limit_reached(config, board):
-                result.failure(
-                    "Can not regress, in-progress limit of %s reached."
-                    % config.limits.wip
-                )
-            else:
-                _place_at_bottom(board, task, TaskState.IN_PROGRESS)
-                task.modified_at = timestamp()
-                result.success("Regressing task %s to in-progress." % task_id)
+        if task.state is TaskState.DONE:
+            target_state = TaskState.IN_PROGRESS
+            success_message = f"Moved #{task.id} to IN PROGRESS."
         elif task.state is TaskState.IN_PROGRESS:
-            if todo_limit_reached(config, board):
-                result.failure(
-                    "Can not regress, todo limit of %s reached."
-                    % config.limits.todo
-                )
-            else:
-                _place_at_bottom(board, task, TaskState.TODO)
-                board.normalize_positions(TaskState.IN_PROGRESS)
-                task.modified_at = timestamp()
-                result.success("Regressing task %s to todo." % task_id)
+            target_state = TaskState.TODO
+            success_message = f"Moved #{task.id} to TODO."
         else:
-            result.failure("Already in todo, can not regress %s" % task_id)
+            result.failure(f"Error: task #{task.id} is already TODO.")
+            continue
+
+        error = _transition_task(config, board, task, target_state)
+        if error is not None:
+            result.failure(error)
+        else:
+            result.success(success_message)
 
     return result
 
@@ -285,57 +336,51 @@ def reorder_task(
 ) -> OperationResult:
     """Reorder one TODO or IN PROGRESS task within its current state."""
     result = OperationResult()
-    numeric_id, error = _parse_task_id(task_id)
+    task, error = _active_task(board, task_id)
     if error is not None:
         result.failure(error)
         return result
-    assert numeric_id is not None
+    assert task is not None
 
-    task = board.active.get(numeric_id)
-    if task is None:
-        result.failure("No existing task with that id: %d" % numeric_id)
-        return result
     if task.state is TaskState.DONE:
-        result.failure("Completed tasks are ordered by completion time.")
+        result.failure("Error: completed tasks are ordered by completion time.")
         return result
 
-    ordered = board.ordered_tasks(task.state)
-    ordered = [candidate for candidate in ordered if candidate.id != numeric_id]
+    ordered = [candidate for candidate in board.ordered_tasks(task.state) if candidate.id != task.id]
 
     if target == "top":
         insert_at = 0
+        success_message = f"Moved #{task.id} to top."
     elif target == "bottom":
         insert_at = len(ordered)
+        success_message = f"Moved #{task.id} to bottom."
     elif target in {"before", "after"}:
         if reference_id is None:
-            result.failure(f"{target} requires a reference task id.")
+            result.failure(f"Error: {target} requires a reference task ID.")
             return result
-        reference_numeric_id, reference_error = _parse_task_id(reference_id)
+        reference, reference_error = _active_task(board, reference_id)
         if reference_error is not None:
             result.failure(reference_error)
             return result
-        assert reference_numeric_id is not None
-        reference = board.active.get(reference_numeric_id)
-        if reference is None:
-            result.failure("No existing task with that id: %d" % reference_numeric_id)
-            return result
+        assert reference is not None
         if reference.id == task.id:
-            result.failure("A task cannot be positioned relative to itself.")
+            result.failure("Error: a task cannot be positioned relative to itself.")
             return result
         if reference.state is not task.state:
-            result.failure("Reference task must be in the same column.")
+            result.failure("Error: reference task must be in the same column.")
             return result
         reference_index = next(
             index for index, candidate in enumerate(ordered) if candidate.id == reference.id
         )
         insert_at = reference_index if target == "before" else reference_index + 1
+        success_message = f"Moved #{task.id} {target} #{reference.id}."
     else:
-        result.failure("Position must be top, bottom, before, or after.")
+        result.failure("Error: position must be top, bottom, before, or after.")
         return result
 
     ordered.insert(insert_at, task)
     for position, candidate in enumerate(ordered, start=1):
         candidate.position = position
     task.modified_at = timestamp()
-    result.success("Moved task %d %s." % (numeric_id, target))
+    result.success(success_message)
     return result
