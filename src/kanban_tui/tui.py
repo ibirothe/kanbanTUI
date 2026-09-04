@@ -237,10 +237,9 @@ class KanbanApp(App[None]):
         yield Static("", id="status")
         yield Footer()
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         self._reload_board()
-        self._refresh_board()
-        self.query_one("#todo-list", ListView).focus()
+        await self._refresh_board()
 
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
         if event.list_view.id:
@@ -264,17 +263,27 @@ class KanbanApp(App[None]):
             search=self.filter_text or None,
         )
 
-    def _refresh_board(
+    async def _refresh_board(
         self,
         *,
         focus_task_id: int | None = None,
         focus_state: TaskState | None = None,
     ) -> None:
+        first_available: tuple[str, ListView] | None = None
+        preferred_view: tuple[str, ListView] | None = None
+        explicit_focus_found = False
+
         for state, view_id in self.STATE_VIEWS.items():
             tasks = self._tasks_for_state(state)
             view = self.query_one(f"#{view_id}", ListView)
-            view.clear()
-            view.extend(TaskListItem(task) for task in tasks)
+            await view.clear()
+            if tasks:
+                await view.extend(TaskListItem(task) for task in tasks)
+                view.index = 0
+                if first_available is None:
+                    first_available = (view_id, view)
+                if view_id == self._last_list_id:
+                    preferred_view = (view_id, view)
 
             title = self.query_one(f"#{self.STATE_TITLES[state]}", Static)
             title.update(
@@ -292,7 +301,17 @@ class KanbanApp(App[None]):
                         view.index = index
                         view.focus()
                         self._last_list_id = view_id
+                        explicit_focus_found = True
                         break
+
+        if not explicit_focus_found:
+            selected = preferred_view or first_available
+            if selected is not None:
+                view_id, view = selected
+                if view.index is None:
+                    view.index = 0
+                view.focus()
+                self._last_list_id = view_id
 
         self.sub_title = (
             f"filter: {self.filter_text}" if self.filter_text else "interactive board"
@@ -309,7 +328,7 @@ class KanbanApp(App[None]):
         self._set_status("No task selected.")
         return None
 
-    def _mutate(
+    async def _mutate(
         self,
         operation: Callable[[Board], OperationResult],
         *,
@@ -327,10 +346,14 @@ class KanbanApp(App[None]):
             self._set_status(f"Error: {exc}")
             return
 
+        actual_focus_state = focus_state
+        if focus_task_id is not None and focus_task_id in board.active:
+            actual_focus_state = board.active[focus_task_id].state
+
         self._set_status(" ".join(result.messages))
-        self._refresh_board(
+        await self._refresh_board(
             focus_task_id=focus_task_id,
-            focus_state=focus_state,
+            focus_state=actual_focus_state,
         )
 
     def action_cursor_down(self) -> None:
@@ -342,10 +365,10 @@ class KanbanApp(App[None]):
     def action_add_task(self) -> None:
         self.push_screen(PromptScreen("Add task"), self._add_prompt_result)
 
-    def _add_prompt_result(self, value: str | None) -> None:
+    async def _add_prompt_result(self, value: str | None) -> None:
         if value is None:
             return
-        self._mutate(lambda board: add_tasks(self.config, board, [value]))
+        await self._mutate(lambda board: add_tasks(self.config, board, [value]))
 
     def action_edit_task(self) -> None:
         task = self._selected_task()
@@ -356,21 +379,21 @@ class KanbanApp(App[None]):
             lambda value: self._edit_prompt_result(task.id, value),
         )
 
-    def _edit_prompt_result(self, task_id: int, value: str | None) -> None:
+    async def _edit_prompt_result(self, task_id: int, value: str | None) -> None:
         if value is None:
             return
         state = self.board.active.get(task_id).state if task_id in self.board.active else None
-        self._mutate(
+        await self._mutate(
             lambda board: edit_task(self.config, board, str(task_id), value),
             focus_task_id=task_id,
             focus_state=state,
         )
 
-    def action_archive_task(self) -> None:
+    async def action_archive_task(self) -> None:
         task = self._selected_task()
         if task is None:
             return
-        self._mutate(lambda board: delete_tasks(board, [str(task.id)]))
+        await self._mutate(lambda board: delete_tasks(board, [str(task.id)]))
 
     def action_restore_task(self) -> None:
         self.push_screen(
@@ -378,11 +401,11 @@ class KanbanApp(App[None]):
             self._restore_prompt_result,
         )
 
-    def _restore_prompt_result(self, value: str | None) -> None:
+    async def _restore_prompt_result(self, value: str | None) -> None:
         if value is None or not value.strip():
             return
         task_id = int(value)
-        self._mutate(
+        await self._mutate(
             lambda board: restore_tasks(self.config, board, [str(task_id)]),
             focus_task_id=task_id,
             focus_state=TaskState.TODO,
@@ -394,21 +417,21 @@ class KanbanApp(App[None]):
             self._search_prompt_result,
         )
 
-    def _search_prompt_result(self, value: str | None) -> None:
+    async def _search_prompt_result(self, value: str | None) -> None:
         if value is None:
             return
         self.filter_text = value.strip()
         self._set_status(
             f"Filter: {self.filter_text}" if self.filter_text else "Filter cleared."
         )
-        self._refresh_board()
+        await self._refresh_board()
 
-    def action_clear_search(self) -> None:
+    async def action_clear_search(self) -> None:
         self.filter_text = ""
         self._set_status("Filter cleared.")
-        self._refresh_board()
+        await self._refresh_board()
 
-    def _move_selected(self, delta: int) -> None:
+    async def _move_selected(self, delta: int) -> None:
         task = self._selected_task()
         if task is None:
             return
@@ -419,7 +442,7 @@ class KanbanApp(App[None]):
             self._set_status("Task is already at the edge of the workflow.")
             return
         target_state = states[target_index]
-        self._mutate(
+        await self._mutate(
             lambda board: move_tasks_to_state(
                 self.config,
                 board,
@@ -430,13 +453,13 @@ class KanbanApp(App[None]):
             focus_state=target_state,
         )
 
-    def action_move_left(self) -> None:
-        self._move_selected(-1)
+    async def action_move_left(self) -> None:
+        await self._move_selected(-1)
 
-    def action_move_right(self) -> None:
-        self._move_selected(1)
+    async def action_move_right(self) -> None:
+        await self._move_selected(1)
 
-    def _reprioritize(self, delta: int) -> None:
+    async def _reprioritize(self, delta: int) -> None:
         task = self._selected_task()
         if task is None:
             return
@@ -445,7 +468,9 @@ class KanbanApp(App[None]):
             return
 
         ordered = self.board.ordered_tasks(task.state)
-        index = next(index for index, candidate in enumerate(ordered) if candidate.id == task.id)
+        index = next(
+            index for index, candidate in enumerate(ordered) if candidate.id == task.id
+        )
         neighbor_index = index + delta
         if neighbor_index < 0 or neighbor_index >= len(ordered):
             self._set_status("Task is already at the edge of the column.")
@@ -453,7 +478,7 @@ class KanbanApp(App[None]):
 
         neighbor = ordered[neighbor_index]
         target = "before" if delta < 0 else "after"
-        self._mutate(
+        await self._mutate(
             lambda board: reorder_task(
                 board,
                 str(task.id),
@@ -464,11 +489,11 @@ class KanbanApp(App[None]):
             focus_state=task.state,
         )
 
-    def action_priority_up(self) -> None:
-        self._reprioritize(-1)
+    async def action_priority_up(self) -> None:
+        await self._reprioritize(-1)
 
-    def action_priority_down(self) -> None:
-        self._reprioritize(1)
+    async def action_priority_down(self) -> None:
+        await self._reprioritize(1)
 
     def action_help(self) -> None:
         self.push_screen(HelpScreen())
