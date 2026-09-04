@@ -1,5 +1,6 @@
-# clikan: CLI (Personal) Kanban
-There has been a little chatter about 'personal' kanban on the tubes lately.  I don't know about the need to hype it as personal, but if you're looking to get your head wrapped around stuff needing to get done - then kanban is a healthy tool.  clikan is a super simple command-line utility for tracking tasks following the Japanese Kanban (boarding) style.  clikan's core intent is to be easy to use, and to maintain simplicity.
+# kanbanTUI / clikan
+
+A small terminal-based personal Kanban board. The installed command remains `clikan` for compatibility.
 
 ![icon](docs/icon-256x256.png)
 
@@ -15,114 +16,70 @@ From a checkout of this repository:
 python -m pip install .
 ```
 
-For local development, install the project and development tools in editable mode:
+For local development:
 
 ```bash
 python -m pip install -e ".[dev]"
 ```
 
-The distribution and CLI command retain the `clikan` name for compatibility.
+## Configuration
 
-### Create a `.clikan.yaml` in your $HOME directory
+Create the default configuration with:
 
-```yaml
----
-clikan_data: /Users/kplummer/.clikan.dat
-limits:
-  todo: 10
-  wip: 3
-  done: 10
-  taskname: 40
-repaint: true
+```bash
+clikan configure
 ```
 
-* `clikan_data` is the datastore file location.
-* `limits:todo` is the max number of items allowed in the todo column, keep this small - you want a smart list, not an ice box of ideas here.
-* `limits:wip` is the max number of items allowed in in-progress at a given time.  Context-switching is a farce, focus on one or two tasks at a time.
-* `limits:done` is the max number of done items visible, they'll still be stored.  It's good to see a list of done items, for pure psyche.
-* `limits:taskname` is the max length of a task text.
-* `repaint` is used to tell `clikan` to show the display after every successful command - default is false/off.
+Or create `~/.clikan.yaml` manually. See [`examples/clikan.yaml`](examples/clikan.yaml).
 
--- or --
+Supported settings:
 
-$ `clikan configure`
-
-to create a default data file location.
-
-This is where the tool will store the history of files.  It's configurable so you can put the data in a Dropbox or other cloud-watched directory for safe archiving/backing up.
-
-If you're like me, even `clikan` is a bunch too many characters to type, so shorten with an alias in my shell config to `clik`.
+- `clikan_data`: datastore path.
+- `limits.todo`: maximum visible/active TODO items when configured.
+- `limits.wip`: maximum simultaneous in-progress items when configured.
+- `limits.done`: maximum done items displayed.
+- `limits.taskname`: maximum task text length.
+- `repaint`: show the board after successful mutating commands.
 
 ## Usage
-The basic usage of clikan breaks down into three basic commands:
 
-### Show
+```bash
+clikan show
+clikan add "Task text"
+clikan promote 1
+clikan regress 1
+clikan delete 1
+```
 
-$ `clikan show` (alias: s)
-
-### Add
-
-$ `clikan add [task text]` (alias: a)
-
-### Promote
-
-$ `clikan promote [task id]` (alias: p)
-
-And there are more supporting commands:
-
-### Regress
-
-$ `clikan regress [task id]`
-
-### Delete
-
-$ `clikan delete [task id]` (alias: d)
-
-### Configure
-
-$ `clikan configure`
-
-### Screenshot
-
-![Screenshot](screenshot.png)
+Unique command prefixes are accepted, so `s`, `a`, `p`, and `d` work for `show`, `add`, `promote`, and `delete` respectively.
 
 ## Development
 
-This fork is maintained as a solo-development project. Changes can be committed directly to the active development branch; no contribution or review workflow is required.
+This is a solo-maintained project. Changes may be committed directly to the active development branch.
 
-### Testing
-
-Run the complete test suite with:
+Run tests:
 
 ```bash
 pytest
 ```
 
-The test suite uses temporary `CLIKAN_HOME` locations and isolated configuration/datastore files, so it does not read or modify your real `~/.clikan.yaml` or Kanban data.
-
-### Build
-
-Build a wheel and source distribution with:
+Build distributions:
 
 ```bash
 python -m build
 ```
 
-Project metadata, runtime dependencies, the console entry point, Python compatibility, and build configuration live in `pyproject.toml`. The package version is read from `VERSION`.
+Project metadata, dependencies, Python compatibility, and build configuration live in `pyproject.toml`.
+
+## Maintainer
+
+Pascal Rothe  
+GitHub: `ibirothe`  
+Email: `ibirothe@gmail.com`
 
 ## License
 
-```
-MIT License
-
-Copyright 2018 Kit Plummer
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-```
+MIT. See [`LICENSE`](LICENSE).
 
 ## Support
 
