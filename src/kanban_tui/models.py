@@ -311,6 +311,24 @@ class Board:
     deleted: dict[int, Task] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        for collection_name, collection in (
+            ("active", self.active),
+            ("deleted", self.deleted),
+        ):
+            for task_id, task in collection.items():
+                if (
+                    isinstance(task_id, bool)
+                    or not isinstance(task_id, int)
+                    or task_id < 1
+                ):
+                    raise ValueError(
+                        f"{collection_name} task ids must be positive integers"
+                    )
+                if task.id != task_id:
+                    raise ValueError(
+                        f"{collection_name} task key {task_id} does not match task id {task.id}"
+                    )
+
         overlapping_ids = set(self.active).intersection(self.deleted)
         if overlapping_ids:
             ids = ", ".join(str(task_id) for task_id in sorted(overlapping_ids))
