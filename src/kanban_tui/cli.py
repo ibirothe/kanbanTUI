@@ -417,14 +417,29 @@ def import_command(path, mode):
     """Import a complete board export."""
     imported = read_export(path)
     config = _read_config()
+    mode_name = mode.lower()
+    remapped: dict[int, int] = {}
 
     with datastore_lock(config):
         current = read_data(config, initialize_missing=False)
-        target = imported if mode.lower() == "replace" else merge_boards(current, imported)
+        if mode_name == "replace":
+            target = imported
+        else:
+            target, remapped = merge_boards(current, imported)
+
+        if target.to_mapping() == current.to_mapping():
+            click.echo("Import produced no board changes.")
+            return
+
         validate_board_capacity(config, target)
         write_data(config, target, snapshot_previous=True)
 
-    click.echo(f"Imported board from {path.resolve()} ({mode.lower()}).")
+    click.echo(f"Imported board from {path.resolve()} ({mode_name}).")
+    if remapped:
+        mapping = ", ".join(
+            f"#{old_id}->#{new_id}" for old_id, new_id in sorted(remapped.items())
+        )
+        click.echo(f"Remapped task IDs: {mapping}")
     if config.repaint:
         display()
 
