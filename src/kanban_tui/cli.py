@@ -34,6 +34,7 @@ from .transfer import (
     merge_boards,
     read_export,
     validate_board_capacity,
+    validate_imported_tasks,
     write_export,
 )
 
@@ -103,6 +104,21 @@ def _run_state_command(ids: tuple[str, ...], target_state: TaskState) -> None:
         result = move_tasks_to_state(config, board, ids, target_state)
         _persist_operation(config, board, result)
     _complete_operation(result, config)
+
+
+def _validate_export_target(path: Path, config) -> Path:
+    target = path.expanduser().resolve()
+    data_path = config.data_path.resolve()
+    protected = {
+        _effective_config_path().resolve(),
+        data_path,
+        Path(f"{data_path}.lock").resolve(),
+    }
+    if target in protected:
+        raise click.ClickException(
+            f"Export target {target} is reserved for the selected board."
+        )
+    return target
 
 
 @click.command(
@@ -397,8 +413,9 @@ def move(task_id, target, reference_id):
 def export_command(path, force):
     """Export the complete selected board as JSON."""
     config = _read_config()
+    target = _validate_export_target(path, config)
     board = read_data(config, initialize_missing=False)
-    exported_path = write_export(path, board, overwrite=force)
+    exported_path = write_export(target, board, overwrite=force)
     click.echo(f"Exported board to {exported_path}")
 
 
@@ -417,6 +434,7 @@ def import_command(path, mode):
     """Import a complete board export."""
     imported = read_export(path)
     config = _read_config()
+    validate_imported_tasks(config, imported)
     mode_name = mode.lower()
     remapped: dict[int, int] = {}
 
