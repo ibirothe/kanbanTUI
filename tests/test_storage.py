@@ -1,3 +1,5 @@
+import os
+import time
 from pathlib import Path
 
 import click
@@ -5,7 +7,12 @@ import pytest
 import yaml
 
 from kanban_tui.models import Board, Task, TaskState
-from kanban_tui.storage import datastore_lock, read_data, write_data
+from kanban_tui.storage import (
+    LOCK_STALE_SECONDS,
+    datastore_lock,
+    read_data,
+    write_data,
+)
 
 
 def test_missing_datastore_is_initialized(write_config, isolated_clikan_home):
@@ -16,6 +23,17 @@ def test_missing_datastore_is_initialized(write_config, isolated_clikan_home):
 
     assert board == Board()
     assert (isolated_clikan_home / ".clikan.dat").exists()
+
+
+def test_missing_datastore_parent_is_created(write_config, tmp_path):
+    data_path = tmp_path / "nested" / "boards" / "board.dat"
+    config = write_config(data_path=data_path)
+
+    with datastore_lock(config):
+        board = read_data(config)
+
+    assert board == Board()
+    assert data_path.exists()
 
 
 def test_write_data_round_trip(write_config):
@@ -39,7 +57,7 @@ def test_write_data_round_trip(write_config):
     assert loaded == board
 
 
-def test_existing_lock_is_rejected(write_config):
+def test_existing_live_lock_is_rejected(write_config):
     config = write_config()
     lock_path = Path(f"{config.clikan_data}.lock")
     lock_path.mkdir()
@@ -47,6 +65,39 @@ def test_existing_lock_is_rejected(write_config):
     with pytest.raises(click.ClickException, match="locked by another clikan process"):
         with datastore_lock(config):
             pass
+
+
+def test_stale_lock_is_recovered(write_config):
+    config = write_config()
+    lock_path = Path(f"{config.clikan_data}.lock")
+    lock_path.mkdir()
+    old_time = time.time() - LOCK_STALE_SECONDS - 10
+    os.utime(lock_path, (old_time, old_time))
+
+    with datastore_lock(config):
+        assert lock_path.exists()
+
+    assert not lock_path.exists()
+
+
+def test_lock_is_cleaned_after_exception(write_config):
+    config = write_config()
+    lock_path = Path(f"{config.clikan_data}.lock")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        with datastore_lock(config):
+            raise RuntimeError("boom")
+
+    assert not lock_path.exists()
+
+
+def test_read_only_missing_datastore_does_not_initialize(write_config):
+    config = write_config()
+
+    board = read_data(config, initialize_missing=False)
+
+    assert board == Board()
+    assert not config.clikan_data.exists()
 
 
 def test_legacy_yaml_format_is_deserialized(write_config):
