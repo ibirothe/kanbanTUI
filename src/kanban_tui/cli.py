@@ -34,7 +34,7 @@ def _echo_messages(messages):
 
 
 def _repaint_if_enabled(config):
-    if config["repaint"]:
+    if config.repaint:
         display()
 
 
@@ -63,9 +63,9 @@ def add(tasks):
     """Add tasks in todo."""
     config = read_config()
     with datastore_lock(config):
-        data = read_data(config)
-        messages = add_tasks(config, data, tasks)
-        write_data(config, data)
+        board = read_data(config)
+        messages = add_tasks(config, board, tasks)
+        write_data(config, board)
     _echo_messages(messages)
     _repaint_if_enabled(config)
 
@@ -76,9 +76,9 @@ def delete(ids):
     """Delete tasks."""
     config = read_config()
     with datastore_lock(config):
-        data = read_data(config)
-        messages = delete_tasks(data, ids)
-        write_data(config, data)
+        board = read_data(config)
+        messages = delete_tasks(board, ids)
+        write_data(config, board)
     _echo_messages(messages)
     _repaint_if_enabled(config)
 
@@ -89,9 +89,9 @@ def promote(ids):
     """Promote tasks."""
     config = read_config()
     with datastore_lock(config):
-        data = read_data(config)
-        messages = promote_tasks(config, data, ids)
-        write_data(config, data)
+        board = read_data(config)
+        messages = promote_tasks(config, board, ids)
+        write_data(config, board)
     _echo_messages(messages)
     _repaint_if_enabled(config)
 
@@ -102,9 +102,9 @@ def regress(ids):
     """Regress tasks."""
     config = read_config()
     with datastore_lock(config):
-        data = read_data(config)
-        messages = regress_tasks(config, data, ids)
-        write_data(config, data)
+        board = read_data(config)
+        messages = regress_tasks(config, board, ids)
+        write_data(config, board)
     _echo_messages(messages)
     _repaint_if_enabled(config)
 
@@ -112,8 +112,8 @@ def regress(ids):
 def display():
     config = read_config()
     with datastore_lock(config):
-        data = read_data(config)
-    render_board(config, data, VERSION)
+        board = read_data(config)
+    render_board(config, board, VERSION)
 
 
 @clikan.command()
