@@ -8,8 +8,8 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Input, Label, ListItem, ListView, Static
 
-from .models import AppConfig, Board, Task, TaskState
-from .rendering import column_label, visible_tasks
+from .models import AppConfig, Board, Task, TaskPriority, TaskState
+from .rendering import column_label, task_display_text, visible_tasks
 from .services import (
     OperationResult,
     add_tasks,
@@ -18,12 +18,14 @@ from .services import (
     move_tasks_to_state,
     reorder_task,
     restore_tasks,
+    set_task_priority,
+    set_task_tags,
 )
 from .storage import datastore_lock, read_data, undo_last_change, write_data
 
 
 class PromptScreen(ModalScreen[str | None]):
-    """Small modal text prompt used for add/edit/search/restore actions."""
+    """Small modal text prompt used for board actions."""
 
     BINDINGS = [Binding("escape", "cancel", "Cancel")]
 
@@ -118,10 +120,12 @@ class HelpScreen(ModalScreen[None]):
                 "Shift+↑/↓    reprioritize within a column\n"
                 "a            add task\n"
                 "e            edit selected task\n"
+                "p            cycle selected task priority\n"
+                "t            set selected task tags\n"
                 "d            archive selected task\n"
                 "r            restore archived task by ID\n"
                 "u            undo last board change\n"
-                "/            search/filter\n"
+                "/            search text/tags/priority\n"
                 "c            clear filter\n"
                 "?            this help\n"
                 "q            quit"
@@ -135,7 +139,7 @@ class TaskListItem(ListItem):
     """List item carrying the task ID represented by the row."""
 
     def __init__(self, task: Task) -> None:
-        super().__init__(Label(f"#{task.id}  {escape(task.text)}"))
+        super().__init__(Label(escape(task_display_text(task))))
         self.task_id = task.id
 
 
@@ -144,11 +148,20 @@ class KanbanApp(App[None]):
 
     TITLE = "kanbanTUI"
     SUB_TITLE = "interactive board"
+    PRIORITY_CYCLE = (
+        None,
+        TaskPriority.LOW,
+        TaskPriority.NORMAL,
+        TaskPriority.HIGH,
+        TaskPriority.URGENT,
+    )
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("a", "add_task", "Add"),
         Binding("e", "edit_task", "Edit"),
+        Binding("p", "cycle_priority", "Priority"),
+        Binding("t", "set_tags", "Tags"),
         Binding("d", "archive_task", "Archive"),
         Binding("r", "restore_task", "Restore"),
         Binding("u", "undo", "Undo"),
@@ -387,6 +400,38 @@ class KanbanApp(App[None]):
         state = self.board.active.get(task_id).state if task_id in self.board.active else None
         await self._mutate(
             lambda board: edit_task(self.config, board, str(task_id), value),
+            focus_task_id=task_id,
+            focus_state=state,
+        )
+
+    async def action_cycle_priority(self) -> None:
+        task = self._selected_task()
+        if task is None:
+            return
+        index = self.PRIORITY_CYCLE.index(task.priority)
+        next_priority = self.PRIORITY_CYCLE[(index + 1) % len(self.PRIORITY_CYCLE)]
+        await self._mutate(
+            lambda board: set_task_priority(board, str(task.id), next_priority),
+            focus_task_id=task.id,
+            focus_state=task.state,
+        )
+
+    def action_set_tags(self) -> None:
+        task = self._selected_task()
+        if task is None:
+            return
+        self.push_screen(
+            PromptScreen("Set tags (comma-separated)", initial=", ".join(task.tags)),
+            lambda value: self._tags_prompt_result(task.id, value),
+        )
+
+    async def _tags_prompt_result(self, task_id: int, value: str | None) -> None:
+        if value is None:
+            return
+        tags = [part.strip() for part in value.split(",") if part.strip()]
+        state = self.board.active.get(task_id).state if task_id in self.board.active else None
+        await self._mutate(
+            lambda board: set_task_tags(board, str(task_id), tags),
             focus_task_id=task_id,
             focus_state=state,
         )
