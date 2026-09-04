@@ -54,7 +54,7 @@ def test_active_tasks_are_sorted_by_manual_position():
     assert inprogs == ["[4] doing first", "[3] doing second"]
 
 
-def test_done_tasks_are_sorted_by_modified_time_newest_first():
+def test_done_tasks_are_sorted_by_completion_time_newest_first():
     board = Board(
         active={
             1: done(1, "oldest", 9),
@@ -66,6 +66,17 @@ def test_done_tasks_are_sorted_by_modified_time_newest_first():
     _, _, dones = split_items(board)
 
     assert dones == ["[2] newest", "[3] middle", "[1] oldest"]
+
+
+def test_done_order_ignores_later_general_modification_time():
+    older = done(1, "completed first", 9)
+    newer = done(2, "completed second", 10)
+    older.modified_at = stamp(12)
+    board = Board(active={1: older, 2: newer})
+
+    _, _, dones = split_items(board)
+
+    assert dones == ["[2] completed second", "[1] completed first"]
 
 
 def test_done_limit_selects_newest_completed_tasks():
@@ -119,9 +130,11 @@ def test_json_output_is_structured_and_deterministic():
         "text": "todo one",
         "created_at": "2026-09-04T08:00:00+00:00",
         "modified_at": "2026-09-04T09:00:00+00:00",
+        "completed_at": None,
         "priority": None,
         "tags": [],
     }
+    assert payload["tasks"][-1]["completed_at"] == "2026-09-04T12:00:00+00:00"
 
 
 def test_search_is_case_insensitive_and_state_filter_composes():
@@ -174,6 +187,9 @@ def test_plain_output_is_stable_color_free_and_escapes_control_text():
 
     output = format_plain(config(), board)
 
-    assert output.splitlines()[0] == "id\tstate\ttext\tcreated_at\tmodified_at\tpriority\ttags"
+    assert (
+        output.splitlines()[0]
+        == "id\tstate\ttext\tcreated_at\tmodified_at\tcompleted_at\tpriority\ttags"
+    )
     assert "1\ttodo\tline\\tbreak\\nnext\t" in output
     assert "\x1b[" not in output
