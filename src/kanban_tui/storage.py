@@ -6,54 +6,12 @@ import tempfile
 import click
 import yaml
 
-
-def validate_task_collection(tasks, collection_name, data_path, allowed_states):
-    if not isinstance(tasks, dict):
-        raise click.ClickException(
-            f"Datastore {data_path}: {collection_name} must be a mapping."
-        )
-
-    for task_id, item in tasks.items():
-        if not isinstance(task_id, int) or isinstance(task_id, bool) or task_id < 1:
-            raise click.ClickException(
-                f"Datastore {data_path}: task ids in {collection_name} must be positive integers."
-            )
-        if not isinstance(item, list) or len(item) < 4:
-            raise click.ClickException(
-                f"Datastore {data_path}: task {task_id} in {collection_name} has an invalid record."
-            )
-        if item[0] not in allowed_states:
-            raise click.ClickException(
-                f"Datastore {data_path}: task {task_id} in {collection_name} has unsupported state {item[0]!r}."
-            )
-        if not isinstance(item[1], str):
-            raise click.ClickException(
-                f"Datastore {data_path}: task {task_id} in {collection_name} must have text content."
-            )
-
-
-def validate_data(data, data_path):
-    if not isinstance(data, dict):
-        raise click.ClickException(
-            f"Datastore {data_path} must contain a YAML mapping."
-        )
-    if "data" not in data or "deleted" not in data:
-        raise click.ClickException(
-            f"Datastore {data_path} must contain data and deleted mappings."
-        )
-
-    validate_task_collection(
-        data["data"], "data", data_path, {"todo", "inprogress", "done"}
-    )
-    validate_task_collection(
-        data["deleted"], "deleted", data_path, {"deleted"}
-    )
-    return data
+from .models import AppConfig, Board
 
 
 @contextmanager
-def datastore_lock(config):
-    data_path = Path(config["clikan_data"]).expanduser().resolve()
+def datastore_lock(config: AppConfig):
+    data_path = config.clikan_data.resolve()
     lock_path = Path(f"{data_path}.lock")
     owner_path = lock_path / "owner"
 
@@ -84,33 +42,36 @@ def datastore_lock(config):
             pass
 
 
-def read_data(config):
-    data_path = Path(config["clikan_data"]).expanduser()
+def read_data(config: AppConfig) -> Board:
+    data_path = config.clikan_data
     try:
         with data_path.open("r", encoding="utf-8") as stream:
             try:
-                data = yaml.safe_load(stream)
+                raw = yaml.safe_load(stream)
             except yaml.YAMLError as exc:
                 raise click.ClickException(
                     f"Datastore {data_path} contains invalid YAML: {exc}"
                 )
     except FileNotFoundError:
         click.echo("No data, initializing data file.")
-        data = {"data": {}, "deleted": {}}
-        write_data(config, data)
-        return data
+        board = Board()
+        write_data(config, board)
+        return board
     except OSError as exc:
         raise click.ClickException(f"Could not read datastore {data_path}: {exc}")
 
-    return validate_data(data, data_path)
+    try:
+        return Board.from_mapping(raw)
+    except ValueError as exc:
+        raise click.ClickException(f"Datastore {data_path}: {exc}") from exc
 
 
-def write_data(config, data):
-    data_path = Path(config["clikan_data"]).expanduser()
-    validate_data(data, data_path)
-
+def write_data(config: AppConfig, board: Board) -> None:
+    data_path = config.clikan_data
+    raw = board.to_mapping()
     directory = data_path.resolve().parent
     temp_path = None
+
     try:
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -121,7 +82,7 @@ def write_data(config, data):
             delete=False,
         ) as outfile:
             temp_path = Path(outfile.name)
-            yaml.safe_dump(data, outfile, default_flow_style=False)
+            yaml.safe_dump(raw, outfile, default_flow_style=False)
             outfile.flush()
             os.fsync(outfile.fileno())
 
