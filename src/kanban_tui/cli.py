@@ -14,7 +14,7 @@ from .config import (
     set_config_value,
     validate_board_name,
 )
-from .models import TaskState
+from .models import TaskPriority, TaskState, normalize_tag
 from .rendering import SORT_CHOICES, render_board, render_history
 from .services import (
     OperationResult,
@@ -26,6 +26,8 @@ from .services import (
     regress_tasks,
     reorder_task,
     restore_tasks,
+    set_task_priority,
+    update_task_tag,
 )
 from .storage import datastore_lock, read_data, undo_last_change, write_data
 from .transfer import (
@@ -169,9 +171,7 @@ def board_list():
 
     if default_path.exists():
         entries.append(("default", default_path))
-    entries.extend(
-        (name, get_board_config_path(name)) for name in list_named_boards()
-    )
+    entries.extend((name, get_board_config_path(name)) for name in list_named_boards())
 
     if not entries:
         click.echo("No boards configured. Create one with: kanban-tui board create NAME")
@@ -245,6 +245,60 @@ def edit(task_id, task_words):
     with datastore_lock(config):
         board = read_data(config)
         result = edit_task(config, board, task_id, task_text)
+        _persist_operation(config, board, result)
+    _complete_operation(result, config)
+
+
+@main.command()
+@click.argument("task_id")
+@click.argument(
+    "level",
+    type=click.Choice(["low", "normal", "high", "urgent", "clear"]),
+)
+def priority(task_id, level):
+    """Set or clear an active task priority."""
+    config = _read_config()
+    selected = None if level == "clear" else TaskPriority(level)
+    with datastore_lock(config):
+        board = read_data(config)
+        result = set_task_priority(board, task_id, selected)
+        _persist_operation(config, board, result)
+    _complete_operation(result, config)
+
+
+@main.group(name="tag")
+def tag_commands():
+    """Add, remove, or clear active task tags."""
+
+
+@tag_commands.command(name="add")
+@click.argument("task_id")
+@click.argument("tag")
+def tag_add(task_id, tag):
+    """Add one tag to a task."""
+    _run_tag_command(task_id, "add", tag)
+
+
+@tag_commands.command(name="remove")
+@click.argument("task_id")
+@click.argument("tag")
+def tag_remove(task_id, tag):
+    """Remove one tag from a task."""
+    _run_tag_command(task_id, "remove", tag)
+
+
+@tag_commands.command(name="clear")
+@click.argument("task_id")
+def tag_clear(task_id):
+    """Clear all tags from a task."""
+    _run_tag_command(task_id, "clear")
+
+
+def _run_tag_command(task_id: str, action: str, tag: str | None = None) -> None:
+    config = _read_config()
+    with datastore_lock(config):
+        board = read_data(config)
+        result = update_task_tag(board, task_id, action, tag)
         _persist_operation(config, board, result)
     _complete_operation(result, config)
 
@@ -392,6 +446,9 @@ def display(
     state_filter: TaskState | None = None,
     search: str | None = None,
     sort_by: str = "default",
+    priority_filter: TaskPriority | None = None,
+    unprioritized_only: bool = False,
+    tag_filter: str | None = None,
 ) -> None:
     config = _read_config()
     board = read_data(config, initialize_missing=False)
@@ -403,6 +460,9 @@ def display(
         state_filter=state_filter,
         search=search,
         sort_by=sort_by,
+        priority_filter=priority_filter,
+        unprioritized_only=unprioritized_only,
+        tag_filter=tag_filter,
     )
 
 
@@ -421,7 +481,7 @@ def display(
     default=None,
     help="Show only one task state.",
 )
-@click.option("--search", default=None, help="Show tasks whose text contains this value.")
+@click.option("--search", default=None, help="Search task text, tags, or priority.")
 @click.option(
     "--sort",
     "sort_by",
@@ -429,14 +489,38 @@ def display(
     default="default",
     show_default=True,
 )
-def show(output_format, state_name, search, sort_by):
+@click.option(
+    "--priority",
+    "priority_name",
+    type=click.Choice(["low", "normal", "high", "urgent", "none"]),
+    default=None,
+    help="Filter by priority, or use none for unprioritized tasks.",
+)
+@click.option("--tag", "tag_name", default=None, help="Filter by exact tag.")
+def show(output_format, state_name, search, sort_by, priority_name, tag_name):
     """Show the board."""
     state_filter = TaskState(state_name.lower()) if state_name else None
+    priority_filter = (
+        TaskPriority(priority_name)
+        if priority_name is not None and priority_name != "none"
+        else None
+    )
+    unprioritized_only = priority_name == "none"
+    tag_filter = None
+    if tag_name is not None:
+        try:
+            tag_filter = normalize_tag(tag_name)
+        except ValueError as exc:
+            raise click.BadParameter(str(exc), param_hint="--tag") from exc
+
     display(
         output_format.lower(),
         state_filter=state_filter,
         search=search,
         sort_by=sort_by.lower(),
+        priority_filter=priority_filter,
+        unprioritized_only=unprioritized_only,
+        tag_filter=tag_filter,
     )
 
 
