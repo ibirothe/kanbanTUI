@@ -117,8 +117,7 @@ def regress(ids):
 
 def display():
     config = read_config()
-    with datastore_lock(config):
-        board = read_data(config)
+    board = read_data(config, initialize_missing=False)
     render_board(config, board, VERSION)
 
 
