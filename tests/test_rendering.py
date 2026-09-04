@@ -119,6 +119,8 @@ def test_json_output_is_structured_and_deterministic():
         "text": "todo one",
         "created_at": "2026-09-04T08:00:00+00:00",
         "modified_at": "2026-09-04T09:00:00+00:00",
+        "priority": None,
+        "tags": [],
     }
 
 
@@ -172,6 +174,6 @@ def test_plain_output_is_stable_color_free_and_escapes_control_text():
 
     output = format_plain(config(), board)
 
-    assert output.splitlines()[0] == "id\tstate\ttext\tcreated_at\tmodified_at"
+    assert output.splitlines()[0] == "id\tstate\ttext\tcreated_at\tmodified_at\tpriority\ttags"
     assert "1\ttodo\tline\\tbreak\\nnext\t" in output
     assert "\x1b[" not in output
