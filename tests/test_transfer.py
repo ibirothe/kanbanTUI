@@ -6,8 +6,7 @@ import pytest
 
 from kanban_tui.cli import main
 from kanban_tui.models import Board, Task, TaskState
-from kanban_tui.services import add_tasks, delete_tasks, move_tasks_to_state
-from kanban_tui.storage import datastore_lock, read_data, write_data
+from kanban_tui.storage import read_data
 from kanban_tui.transfer import (
     EXPORT_FORMAT,
     EXPORT_VERSION,
@@ -100,22 +99,38 @@ def test_invalid_export_format_and_duplicate_ids_are_rejected():
         board_from_export(payload)
 
 
-def test_merge_appends_ordered_tasks_and_rejects_id_conflicts():
-    current = Board(active={1: task(1, TaskState.TODO, "one", position=1)})
+def test_merge_appends_tasks_and_remaps_active_and_archived_id_collisions():
+    current = Board(
+        active={1: task(1, TaskState.TODO, "current", position=1)},
+        deleted={4: task(4, TaskState.DELETED, "current archived", position=4)},
+    )
     imported = Board(
         active={
-            2: task(2, TaskState.TODO, "two", position=1),
-            3: task(3, TaskState.IN_PROGRESS, "three", position=1),
-        }
+            1: task(1, TaskState.TODO, "incoming collision", position=1),
+            2: task(2, TaskState.IN_PROGRESS, "incoming stable", position=1),
+        },
+        deleted={4: task(4, TaskState.DELETED, "incoming archived", position=4)},
     )
 
-    merged = merge_boards(current, imported)
+    merged, remapped = merge_boards(current, imported)
 
-    assert [task.id for task in merged.ordered_tasks(TaskState.TODO)] == [1, 2]
-    assert [task.id for task in merged.ordered_tasks(TaskState.IN_PROGRESS)] == [3]
+    assert remapped == {1: 5, 4: 6}
+    assert [item.id for item in merged.ordered_tasks(TaskState.TODO)] == [1, 5]
+    assert [item.id for item in merged.ordered_tasks(TaskState.IN_PROGRESS)] == [2]
+    assert merged.active[5].text == "incoming collision"
+    assert merged.deleted[4].text == "current archived"
+    assert merged.deleted[6].text == "incoming archived"
+    assert merged.next_task_id() == 7
 
-    with pytest.raises(click.ClickException, match="task ID conflicts: 1"):
-        merge_boards(current, Board(active={1: task(1, TaskState.TODO, "duplicate")}))
+
+def test_merge_preserves_non_conflicting_ids():
+    current = Board(active={1: task(1, TaskState.TODO, "one")})
+    imported = Board(active={8: task(8, TaskState.TODO, "eight")})
+
+    merged, remapped = merge_boards(current, imported)
+
+    assert remapped == {}
+    assert set(merged.active) == {1, 8}
 
 
 def test_import_capacity_is_validated_before_write(write_config):
@@ -157,16 +172,14 @@ def test_cli_export_import_replace_and_undo(runner, write_config, tmp_path):
 
     assert export_result.exit_code == 0
     assert import_result.exit_code == 0
-    assert read_data(config, initialize_missing=False).active[1].text == "original"
+    assert read_data(config).active[1].text == "original"
 
     undo_result = runner.invoke(main, ["undo"])
     assert undo_result.exit_code == 0
-    assert read_data(config, initialize_missing=False).active[1].text == "changed"
+    assert read_data(config).active[1].text == "changed"
 
 
-def test_cli_import_merge_rejects_conflicting_ids_without_mutating_board(
-    runner, write_config, tmp_path
-):
+def test_cli_import_merge_remaps_conflicting_ids(runner, write_config, tmp_path):
     config = write_config()
     runner.invoke(main, ["add", "current"])
     path = tmp_path / "conflict.json"
@@ -175,6 +188,44 @@ def test_cli_import_merge_rejects_conflicting_ids_without_mutating_board(
 
     result = runner.invoke(main, ["import", str(path), "--mode", "merge"])
 
-    assert result.exit_code != 0
-    board = read_data(config, initialize_missing=False)
+    assert result.exit_code == 0
+    assert "Remapped task IDs: #1->#2" in result.output
+    board = read_data(config)
     assert board.active[1].text == "current"
+    assert board.active[2].text == "incoming"
+
+
+def test_identical_replace_import_preserves_previous_undo_snapshot(
+    runner, write_config, tmp_path
+):
+    config = write_config()
+    runner.invoke(main, ["add", "original"])
+    runner.invoke(main, ["edit", "1", "changed"])
+    current = read_data(config)
+    path = tmp_path / "same.json"
+    write_export(path, current)
+
+    import_result = runner.invoke(main, ["import", str(path), "--mode", "replace"])
+
+    assert import_result.exit_code == 0
+    assert import_result.output == "Import produced no board changes.\n"
+
+    undo_result = runner.invoke(main, ["undo"])
+    assert undo_result.exit_code == 0
+    assert read_data(config).active[1].text == "original"
+
+
+def test_empty_merge_import_preserves_previous_undo_snapshot(runner, write_config, tmp_path):
+    config = write_config()
+    runner.invoke(main, ["add", "original"])
+    runner.invoke(main, ["edit", "1", "changed"])
+    path = tmp_path / "empty.json"
+    write_export(path, Board())
+
+    import_result = runner.invoke(main, ["import", str(path), "--mode", "merge"])
+
+    assert import_result.exit_code == 0
+    assert import_result.output == "Import produced no board changes.\n"
+
+    runner.invoke(main, ["undo"])
+    assert read_data(config).active[1].text == "original"
