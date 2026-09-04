@@ -9,12 +9,12 @@ description = "Simple CLI-based personal Kanban board"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-license-files = ["License.txt"]
+license-files = ["LICENSE"]
 authors = [
-    { name = "Kit Plummer" },
+    { name = "Pascal Rothe", email = "ibirothe@gmail.com" },
 ]
 maintainers = [
-    { name = "ibirothe" },
+    { name = "Pascal Rothe", email = "ibirothe@gmail.com" },
 ]
 keywords = ["kanban", "cli", "tui", "productivity"]
 classifiers = [
