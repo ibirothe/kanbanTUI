@@ -13,7 +13,9 @@ def get_clikan_home() -> Path:
     return home.resolve()
 
 
-def get_config_path() -> Path:
+def get_config_path(explicit_path: Path | None = None) -> Path:
+    if explicit_path is not None:
+        return explicit_path.expanduser().resolve()
     return get_clikan_home() / ".clikan.yaml"
 
 
@@ -54,8 +56,8 @@ def validate_config(config, config_path: Path) -> AppConfig:
     )
 
 
-def read_config() -> AppConfig:
-    config_path = get_config_path()
+def read_config(explicit_path: Path | None = None) -> AppConfig:
+    config_path = get_config_path(explicit_path)
     try:
         with config_path.open("r", encoding="utf-8") as stream:
             try:
@@ -72,12 +74,11 @@ def read_config() -> AppConfig:
     return validate_config(config, config_path)
 
 
-def create_default_config() -> Path:
-    home = get_clikan_home()
-    config_path = home / ".clikan.yaml"
-    data_path = home / ".clikan.dat"
+def create_default_config(explicit_path: Path | None = None) -> Path:
+    config_path = get_config_path(explicit_path)
+    data_path = config_path.with_suffix(".dat")
     try:
-        home.mkdir(parents=True, exist_ok=True)
+        config_path.parent.mkdir(parents=True, exist_ok=True)
         with config_path.open("w", encoding="utf-8") as outfile:
             yaml.safe_dump(
                 {"clikan_data": str(data_path)},
