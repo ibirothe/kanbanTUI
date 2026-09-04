@@ -4,6 +4,8 @@ from pathlib import Path
 import click
 import yaml
 
+from .models import AppConfig, Limits
+
 
 def get_clikan_home() -> Path:
     configured_home = os.environ.get("CLIKAN_HOME")
@@ -14,8 +16,7 @@ def get_config_path() -> Path:
     return get_clikan_home() / ".clikan.yaml"
 
 
-def validate_config(config, config_path: Path):
-    """Validate and normalize application configuration."""
+def validate_config(config, config_path: Path) -> AppConfig:
     if not isinstance(config, dict):
         raise click.ClickException(
             f"Config file {config_path} must contain a YAML mapping."
@@ -27,33 +28,10 @@ def validate_config(config, config_path: Path):
             f"Config file {config_path} must define a non-empty clikan_data path."
         )
 
-    limits = config.get("limits", {})
-    if limits is None:
-        limits = {}
-    if not isinstance(limits, dict):
-        raise click.ClickException(
-            f"Config file {config_path}: limits must be a mapping."
-        )
-
-    for name in ("todo", "wip", "done", "taskname"):
-        if name not in limits:
-            continue
-        value = limits[name]
-        if isinstance(value, bool):
-            raise click.ClickException(
-                f"Config file {config_path}: limits.{name} must be a non-negative integer."
-            )
-        try:
-            normalized = int(value)
-        except (TypeError, ValueError):
-            raise click.ClickException(
-                f"Config file {config_path}: limits.{name} must be a non-negative integer."
-            )
-        if normalized < 0:
-            raise click.ClickException(
-                f"Config file {config_path}: limits.{name} must be a non-negative integer."
-            )
-        limits[name] = normalized
+    try:
+        limits = Limits.from_mapping(config.get("limits"))
+    except ValueError as exc:
+        raise click.ClickException(f"Config file {config_path}: {exc}") from exc
 
     repaint = config.get("repaint", False)
     if not isinstance(repaint, bool):
@@ -61,14 +39,14 @@ def validate_config(config, config_path: Path):
             f"Config file {config_path}: repaint must be true or false."
         )
 
-    limits.setdefault("taskname", 40)
-    limits.setdefault("done", 10)
-    config["limits"] = limits
-    config["repaint"] = repaint
-    return config
+    return AppConfig(
+        clikan_data=Path(clikan_data).expanduser(),
+        limits=limits,
+        repaint=repaint,
+    )
 
 
-def read_config():
+def read_config() -> AppConfig:
     config_path = get_config_path()
     try:
         with config_path.open("r", encoding="utf-8") as stream:
