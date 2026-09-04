@@ -20,25 +20,25 @@ NOW = datetime(2026, 9, 4, 10, 0, tzinfo=timezone.utc)
 BEFORE = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
 
 
-def test_missing_datastore_is_initialized(write_config, isolated_app_home):
+def test_missing_datastore_read_is_side_effect_free(write_config, capsys):
     config = write_config()
 
-    with datastore_lock(config):
-        board = read_data(config)
+    board = read_data(config)
 
     assert board == Board()
-    assert (isolated_app_home / ".kanban-tui.dat").exists()
+    assert not config.data_path.exists()
+    assert capsys.readouterr().out == ""
 
 
-def test_missing_datastore_parent_is_created(write_config, tmp_path):
+def test_missing_datastore_read_does_not_create_parent(write_config, tmp_path):
     data_path = tmp_path / "nested" / "boards" / "board.dat"
     config = write_config(data_path=data_path)
 
-    with datastore_lock(config):
-        board = read_data(config)
+    board = read_data(config)
 
     assert board == Board()
-    assert data_path.exists()
+    assert not data_path.exists()
+    assert not data_path.parent.exists()
 
 
 def test_write_data_round_trip_uses_iso_timestamps(write_config):
@@ -99,10 +99,10 @@ def test_lock_is_cleaned_after_exception(write_config):
     assert not lock_path.exists()
 
 
-def test_read_only_missing_datastore_does_not_initialize(write_config):
+def test_initialize_missing_flag_no_longer_changes_read_behavior(write_config):
     config = write_config()
 
-    board = read_data(config, initialize_missing=False)
+    board = read_data(config, initialize_missing=True)
 
     assert board == Board()
     assert not config.data_path.exists()
