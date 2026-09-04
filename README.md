@@ -58,6 +58,18 @@ clikan restore 1
 
 `history` shows the deleted-task archive. `restore` moves deleted tasks back to TODO with their original IDs and creation timestamps; restoration respects the configured TODO capacity.
 
+### Output formats
+
+`show` supports three output formats:
+
+```bash
+clikan show --format table
+clikan show --format plain
+clikan show --format json
+```
+
+`table` is the default Rich terminal view. `plain` emits deterministic tab-separated text without color codes. `json` emits a structured `tasks` array containing task ID, state, text, and timezone-aware ISO 8601 creation/modification timestamps. All formats use the same deterministic ordering and configured DONE display limit. Rich table output honors `NO_COLOR`.
+
 Commands that require task IDs or task text report a standard Click usage error when their operand is missing. Rejected task operations such as invalid IDs, unknown IDs, capacity-limit failures, or invalid task text return a non-zero exit code. For commands that accept multiple IDs, the command returns non-zero if any requested operation fails, even when other items succeed.
 
 Unique command prefixes are accepted. `s`, `a`, `p`, and `d` remain the short forms for `show`, `add`, `promote`, and `delete` respectively.
