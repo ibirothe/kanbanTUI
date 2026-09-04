@@ -73,10 +73,17 @@ class Task:
     position: int = 0
     priority: TaskPriority | None = None
     tags: tuple[str, ...] = ()
+    completed_at: datetime | None = None
 
     def __post_init__(self) -> None:
         self.modified_at = parse_timestamp(self.modified_at)
         self.created_at = parse_timestamp(self.created_at)
+        if self.completed_at is not None:
+            self.completed_at = parse_timestamp(self.completed_at)
+        elif self.state is TaskState.DONE:
+            # Legacy records used modified_at as the completion timestamp.
+            self.completed_at = self.modified_at
+
         if isinstance(self.position, bool) or not isinstance(self.position, int):
             raise ValueError("task position must be a non-negative integer")
         if self.position < 0:
@@ -142,6 +149,7 @@ class Task:
 
         priority: TaskPriority | None = None
         tags: tuple[str, ...] = ()
+        completed_at: datetime | None = None
         if len(record) >= 6:
             metadata = record[5]
             if metadata is None:
@@ -164,6 +172,15 @@ class Task:
             except ValueError as exc:
                 raise ValueError(f"task {task_id} has invalid tags: {exc}") from exc
 
+            raw_completed_at = metadata.get("completed_at")
+            if raw_completed_at is not None:
+                try:
+                    completed_at = parse_timestamp(raw_completed_at)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"task {task_id} has an invalid completion timestamp: {exc}"
+                    ) from exc
+
         return cls(
             id=task_id,
             state=state,
@@ -173,6 +190,7 @@ class Task:
             position=position,
             priority=priority,
             tags=tags,
+            completed_at=completed_at,
         )
 
     def to_record(self) -> list[Any]:
@@ -188,6 +206,8 @@ class Task:
             metadata["priority"] = self.priority.value
         if self.tags:
             metadata["tags"] = list(self.tags)
+        if self.completed_at is not None:
+            metadata["completed_at"] = format_timestamp(self.completed_at)
         if metadata:
             record.append(metadata)
         return record
@@ -274,7 +294,7 @@ class Board:
         if state is TaskState.DONE:
             return sorted(
                 tasks,
-                key=lambda task: (task.modified_at, task.id),
+                key=lambda task: (task.completed_at or task.modified_at, task.id),
                 reverse=True,
             )
         return sorted(tasks, key=lambda task: (task.position, task.id))
