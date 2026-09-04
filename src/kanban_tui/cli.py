@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import click
 from click_default_group import DefaultGroup
 
@@ -36,6 +38,17 @@ class PrefixGroup(DefaultGroup):
         ctx.fail("Too many matches: %s" % ", ".join(sorted(matches)))
 
 
+def _selected_config_path() -> Path | None:
+    """Return the root --config value for the current command invocation."""
+    root_context = click.get_current_context().find_root()
+    config_path = root_context.params.get("config_path")
+    return config_path if isinstance(config_path, Path) else None
+
+
+def _read_config():
+    return read_config(_selected_config_path())
+
+
 def _echo_messages(messages: list[str]) -> None:
     for message in messages:
         click.echo(message)
@@ -49,22 +62,30 @@ def _complete_operation(result: OperationResult, config) -> None:
         raise click.exceptions.Exit(1)
 
 
-@click.version_option(VERSION)
 @click.command(cls=PrefixGroup, default="show", default_if_no_args=True)
-def clikan():
+@click.version_option(VERSION)
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(path_type=Path, dir_okay=False),
+    default=None,
+    help="Use an explicit YAML configuration file.",
+)
+def clikan(config_path):
     """clikan: CLI personal kanban"""
 
 
 @clikan.command()
 def configure():
-    """Create the default configuration in CLIKAN_HOME or HOME."""
-    config_path = get_config_path()
+    """Create the selected configuration and default datastore path."""
+    explicit_path = _selected_config_path()
+    config_path = get_config_path(explicit_path)
     if config_path.exists() and not click.confirm(
         "Config file exists. Do you want to overwrite?"
     ):
         return
 
-    created_path = create_default_config()
+    created_path = create_default_config(explicit_path)
     click.echo(f"Creating {created_path}")
 
 
@@ -72,7 +93,7 @@ def configure():
 @click.argument("task_words", nargs=-1, required=True)
 def add(task_words):
     """Add one task to todo."""
-    config = read_config()
+    config = _read_config()
     task_text = " ".join(task_words)
     with datastore_lock(config):
         board = read_data(config)
@@ -86,7 +107,7 @@ def add(task_words):
 @click.argument("task_words", nargs=-1, required=True)
 def edit(task_id, task_words):
     """Edit the text of an active task."""
-    config = read_config()
+    config = _read_config()
     task_text = " ".join(task_words)
     with datastore_lock(config):
         board = read_data(config)
@@ -99,7 +120,7 @@ def edit(task_id, task_words):
 @click.argument("ids", nargs=-1, required=True)
 def delete(ids):
     """Delete tasks."""
-    config = read_config()
+    config = _read_config()
     with datastore_lock(config):
         board = read_data(config)
         result = delete_tasks(board, ids)
@@ -111,7 +132,7 @@ def delete(ids):
 @click.argument("ids", nargs=-1, required=True)
 def restore(ids):
     """Restore deleted tasks to todo."""
-    config = read_config()
+    config = _read_config()
     with datastore_lock(config):
         board = read_data(config)
         result = restore_tasks(config, board, ids)
@@ -123,7 +144,7 @@ def restore(ids):
 @click.argument("ids", nargs=-1, required=True)
 def promote(ids):
     """Promote tasks."""
-    config = read_config()
+    config = _read_config()
     with datastore_lock(config):
         board = read_data(config)
         result = promote_tasks(config, board, ids)
@@ -135,7 +156,7 @@ def promote(ids):
 @click.argument("ids", nargs=-1, required=True)
 def regress(ids):
     """Regress tasks."""
-    config = read_config()
+    config = _read_config()
     with datastore_lock(config):
         board = read_data(config)
         result = regress_tasks(config, board, ids)
@@ -144,7 +165,7 @@ def regress(ids):
 
 
 def display(output_format: str = "table") -> None:
-    config = read_config()
+    config = _read_config()
     board = read_data(config, initialize_missing=False)
     render_board(config, board, VERSION, output_format)
 
@@ -165,6 +186,6 @@ def show(output_format):
 @clikan.command()
 def history():
     """Show deleted task history."""
-    config = read_config()
+    config = _read_config()
     board = read_data(config, initialize_missing=False)
     render_history(board)
