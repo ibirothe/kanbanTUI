@@ -3,6 +3,7 @@ import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import click
 import yaml
@@ -11,6 +12,7 @@ from .models import AppConfig, Board
 
 
 LOCK_STALE_SECONDS = 300
+UNDO_KEY = "_undo"
 
 
 def _read_owner_pid(owner_path: Path) -> int | None:
@@ -96,36 +98,24 @@ def datastore_lock(config: AppConfig):
         _remove_lock(lock_path, owner_path)
 
 
-def read_data(config: AppConfig, *, initialize_missing: bool = True) -> Board:
-    data_path = config.data_path
+def _read_raw_data(data_path: Path) -> Any:
     try:
         with data_path.open("r", encoding="utf-8") as stream:
             try:
-                raw = yaml.safe_load(stream)
+                return yaml.safe_load(stream)
             except yaml.YAMLError as exc:
                 raise click.ClickException(
                     f"Datastore {data_path} contains invalid YAML: {exc}"
-                )
+                ) from exc
     except FileNotFoundError:
-        board = Board()
-        if initialize_missing:
-            click.echo("No data, initializing data file.")
-            write_data(config, board)
-        return board
+        raise
     except OSError as exc:
-        raise click.ClickException(f"Could not read datastore {data_path}: {exc}")
-
-    try:
-        return Board.from_mapping(raw)
-    except ValueError as exc:
-        raise click.ClickException(f"Datastore {data_path}: {exc}") from exc
+        raise click.ClickException(f"Could not read datastore {data_path}: {exc}") from exc
 
 
-def write_data(config: AppConfig, board: Board) -> None:
-    data_path = config.data_path
-    raw = board.to_mapping()
+def _atomic_write_mapping(data_path: Path, raw: dict[str, Any]) -> None:
     directory = data_path.parent
-    temp_path = None
+    temp_path: Path | None = None
 
     try:
         directory.mkdir(parents=True, exist_ok=True)
@@ -145,10 +135,59 @@ def write_data(config: AppConfig, board: Board) -> None:
         os.replace(temp_path, data_path)
         temp_path = None
     except (OSError, yaml.YAMLError) as exc:
-        raise click.ClickException(f"Could not write datastore {data_path}: {exc}")
+        raise click.ClickException(f"Could not write datastore {data_path}: {exc}") from exc
     finally:
         if temp_path is not None:
             try:
                 temp_path.unlink()
             except OSError:
                 pass
+
+
+def read_data(config: AppConfig, *, initialize_missing: bool = True) -> Board:
+    data_path = config.data_path
+    try:
+        raw = _read_raw_data(data_path)
+    except FileNotFoundError:
+        board = Board()
+        if initialize_missing:
+            click.echo("No data, initializing data file.")
+            write_data(config, board)
+        return board
+
+    try:
+        return Board.from_mapping(raw)
+    except ValueError as exc:
+        raise click.ClickException(f"Datastore {data_path}: {exc}") from exc
+
+
+def write_data(
+    config: AppConfig,
+    board: Board,
+    *,
+    snapshot_previous: bool = False,
+) -> None:
+    raw: dict[str, Any] = board.to_mapping()
+    if snapshot_previous:
+        previous = read_data(config, initialize_missing=False)
+        raw[UNDO_KEY] = previous.to_mapping()
+    _atomic_write_mapping(config.data_path, raw)
+
+
+def undo_last_change(config: AppConfig) -> Board:
+    data_path = config.data_path
+    try:
+        raw = _read_raw_data(data_path)
+    except FileNotFoundError as exc:
+        raise click.ClickException("Nothing to undo.") from exc
+
+    if not isinstance(raw, dict) or UNDO_KEY not in raw:
+        raise click.ClickException("Nothing to undo.")
+
+    try:
+        previous = Board.from_mapping(raw[UNDO_KEY])
+    except ValueError as exc:
+        raise click.ClickException(f"Undo snapshot is invalid: {exc}") from exc
+
+    _atomic_write_mapping(data_path, previous.to_mapping())
+    return previous
