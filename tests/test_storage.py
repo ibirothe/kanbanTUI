@@ -20,14 +20,14 @@ NOW = datetime(2026, 9, 4, 10, 0, tzinfo=timezone.utc)
 BEFORE = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
 
 
-def test_missing_datastore_is_initialized(write_config, isolated_clikan_home):
+def test_missing_datastore_is_initialized(write_config, isolated_app_home):
     config = write_config()
 
     with datastore_lock(config):
         board = read_data(config)
 
     assert board == Board()
-    assert (isolated_clikan_home / ".clikan.dat").exists()
+    assert (isolated_app_home / ".kanban-tui.dat").exists()
 
 
 def test_missing_datastore_parent_is_created(write_config, tmp_path):
@@ -59,7 +59,7 @@ def test_write_data_round_trip_uses_iso_timestamps(write_config):
         write_data(config, board)
         loaded = read_data(config)
 
-    raw = yaml.safe_load(config.clikan_data.read_text(encoding="utf-8"))
+    raw = yaml.safe_load(config.data_path.read_text(encoding="utf-8"))
     assert loaded == board
     assert raw["data"][1][2] == "2026-09-04T10:00:00+00:00"
     assert raw["data"][1][3] == "2026-09-04T09:00:00+00:00"
@@ -67,17 +67,17 @@ def test_write_data_round_trip_uses_iso_timestamps(write_config):
 
 def test_existing_live_lock_is_rejected(write_config):
     config = write_config()
-    lock_path = Path(f"{config.clikan_data}.lock")
+    lock_path = Path(f"{config.data_path}.lock")
     lock_path.mkdir()
 
-    with pytest.raises(click.ClickException, match="locked by another clikan process"):
+    with pytest.raises(click.ClickException, match="locked by another kanban-tui process"):
         with datastore_lock(config):
             pass
 
 
 def test_stale_lock_is_recovered(write_config):
     config = write_config()
-    lock_path = Path(f"{config.clikan_data}.lock")
+    lock_path = Path(f"{config.data_path}.lock")
     lock_path.mkdir()
     old_time = time.time() - LOCK_STALE_SECONDS - 10
     os.utime(lock_path, (old_time, old_time))
@@ -90,7 +90,7 @@ def test_stale_lock_is_recovered(write_config):
 
 def test_lock_is_cleaned_after_exception(write_config):
     config = write_config()
-    lock_path = Path(f"{config.clikan_data}.lock")
+    lock_path = Path(f"{config.data_path}.lock")
 
     with pytest.raises(RuntimeError, match="boom"):
         with datastore_lock(config):
@@ -105,12 +105,12 @@ def test_read_only_missing_datastore_does_not_initialize(write_config):
     board = read_data(config, initialize_missing=False)
 
     assert board == Board()
-    assert not config.clikan_data.exists()
+    assert not config.data_path.exists()
 
 
-def test_legacy_yaml_timestamp_format_is_deserialized(write_config):
+def test_older_timestamp_format_is_deserialized(write_config):
     config = write_config()
-    config.clikan_data.write_text(
+    config.data_path.write_text(
         yaml.safe_dump(
             {
                 "data": {
@@ -137,7 +137,7 @@ def test_legacy_yaml_timestamp_format_is_deserialized(write_config):
 
 def test_invalid_datastore_record_is_rejected(write_config):
     config = write_config()
-    config.clikan_data.write_text(
+    config.data_path.write_text(
         yaml.safe_dump({"data": {1: ["todo"]}, "deleted": {}}),
         encoding="utf-8",
     )
