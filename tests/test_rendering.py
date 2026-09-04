@@ -17,7 +17,7 @@ def stamp(hour: int):
 
 def config(*, done_limit: int = 10):
     return AppConfig(
-        clikan_data=Path("/tmp/unused"),
+        data_path=Path("/tmp/unused"),
         limits=Limits(done=done_limit),
     )
 
