@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clikan"
+dynamic = ["version"]
+description = "Simple CLI-based personal Kanban board"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["License.txt"]
+authors = [
+    { name = "Kit Plummer" },
+]
+maintainers = [
+    { name = "ibirothe" },
+]
+keywords = ["kanban", "cli", "tui", "productivity"]
+classifiers = [
+    "Environment :: Console",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+]
+dependencies = [
+    "Click>=8.0.1",
+    "click-default-group>=1.2.4",
+    "PyYAML>=6.0",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "build>=1.2",
+]
+
+[project.scripts]
+clikan = "clikan:clikan"
+
+[project.urls]
+Repository = "https://github.com/ibirothe/kanbanTUI"
+Issues = "https://github.com/ibirothe/kanbanTUI/issues"
+
+[tool.setuptools]
+py-modules = ["clikan"]
+
+[tool.setuptools.dynamic]
+version = { file = "VERSION" }
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+python_files = ["*_test.py"]
