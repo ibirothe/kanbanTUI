@@ -5,12 +5,14 @@ from click_default_group import DefaultGroup
 
 from . import VERSION
 from .config import create_default_config, get_config_path, read_config
+from .models import TaskState
 from .rendering import render_board, render_history
 from .services import (
     OperationResult,
     add_tasks,
     delete_tasks,
     edit_task,
+    move_tasks_to_state,
     promote_tasks,
     regress_tasks,
     reorder_task,
@@ -62,6 +64,15 @@ def _complete_operation(result: OperationResult, config) -> None:
         raise click.exceptions.Exit(1)
 
 
+def _run_state_command(ids: tuple[str, ...], target_state: TaskState) -> None:
+    config = _read_config()
+    with datastore_lock(config):
+        board = read_data(config)
+        result = move_tasks_to_state(config, board, ids, target_state)
+        write_data(config, board)
+    _complete_operation(result, config)
+
+
 @click.command(
     name="kanban-tui",
     cls=PrefixGroup,
@@ -97,7 +108,7 @@ def configure():
 @main.command()
 @click.argument("task_words", nargs=-1, required=True)
 def add(task_words):
-    """Add one task to todo."""
+    """Add one task to TODO."""
     config = _read_config()
     task_text = " ".join(task_words)
     with datastore_lock(config):
@@ -124,7 +135,7 @@ def edit(task_id, task_words):
 @main.command()
 @click.argument("ids", nargs=-1, required=True)
 def delete(ids):
-    """Delete tasks."""
+    """Archive tasks."""
     config = _read_config()
     with datastore_lock(config):
         board = read_data(config)
@@ -136,7 +147,7 @@ def delete(ids):
 @main.command()
 @click.argument("ids", nargs=-1, required=True)
 def restore(ids):
-    """Restore deleted tasks to todo."""
+    """Restore archived tasks to TODO."""
     config = _read_config()
     with datastore_lock(config):
         board = read_data(config)
@@ -147,8 +158,29 @@ def restore(ids):
 
 @main.command()
 @click.argument("ids", nargs=-1, required=True)
+def start(ids):
+    """Move tasks to IN PROGRESS."""
+    _run_state_command(ids, TaskState.IN_PROGRESS)
+
+
+@main.command()
+@click.argument("ids", nargs=-1, required=True)
+def done(ids):
+    """Complete tasks."""
+    _run_state_command(ids, TaskState.DONE)
+
+
+@main.command()
+@click.argument("ids", nargs=-1, required=True)
+def todo(ids):
+    """Move tasks to TODO."""
+    _run_state_command(ids, TaskState.TODO)
+
+
+@main.command()
+@click.argument("ids", nargs=-1, required=True)
 def promote(ids):
-    """Promote tasks."""
+    """Advance tasks by one state."""
     config = _read_config()
     with datastore_lock(config):
         board = read_data(config)
@@ -160,7 +192,7 @@ def promote(ids):
 @main.command()
 @click.argument("ids", nargs=-1, required=True)
 def regress(ids):
-    """Regress tasks."""
+    """Move tasks back by one state."""
     config = _read_config()
     with datastore_lock(config):
         board = read_data(config)
@@ -174,7 +206,7 @@ def regress(ids):
 @click.argument("target", type=click.Choice(["top", "bottom", "before", "after"]))
 @click.argument("reference_id", required=False)
 def move(task_id, target, reference_id):
-    """Reorder a TODO or in-progress task within its current column."""
+    """Reorder a TODO or IN PROGRESS task within its current column."""
     if target in {"before", "after"} and reference_id is None:
         raise click.UsageError(f"{target} requires REFERENCE_ID")
     if target in {"top", "bottom"} and reference_id is not None:
@@ -209,7 +241,7 @@ def show(output_format):
 
 @main.command()
 def history():
-    """Show deleted task history."""
+    """Show archived task history."""
     config = _read_config()
     board = read_data(config, initialize_missing=False)
     render_history(board)
