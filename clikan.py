@@ -10,9 +10,23 @@ from textwrap import wrap
 import collections
 import datetime
 import configparser
-import importlib
+from importlib.metadata import PackageNotFoundError, version as package_version
 
-VERSION = importlib.metadata.version('clikan')
+
+def get_version():
+    """Return the installed package version, falling back to VERSION."""
+    try:
+        return package_version('clikan')
+    except PackageNotFoundError:
+        version_path = os.path.join(os.path.dirname(__file__), 'VERSION')
+        try:
+            with open(version_path, 'r') as version_file:
+                return version_file.read().strip()
+        except OSError:
+            return 'unknown'
+
+
+VERSION = get_version()
 
 
 class Config(object):
