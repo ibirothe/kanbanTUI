@@ -2,12 +2,44 @@ import json
 import os
 
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
-from .models import AppConfig, Board, Task, TaskState, format_timestamp
+from .models import (
+    AppConfig,
+    Board,
+    Task,
+    TaskPriority,
+    TaskState,
+    format_timestamp,
+)
 
 
 SORT_CHOICES = ("default", "id", "created", "modified")
+
+
+def _matches_filters(
+    task: Task,
+    *,
+    search: str | None = None,
+    priority_filter: TaskPriority | None = None,
+    unprioritized_only: bool = False,
+    tag_filter: str | None = None,
+) -> bool:
+    if priority_filter is not None and task.priority is not priority_filter:
+        return False
+    if unprioritized_only and task.priority is not None:
+        return False
+    if tag_filter is not None and tag_filter not in task.tags:
+        return False
+    if search:
+        needle = search.casefold()
+        searchable = [task.text, *task.tags]
+        if task.priority is not None:
+            searchable.append(task.priority.value)
+        if not any(needle in value.casefold() for value in searchable):
+            return False
+    return True
 
 
 def _tasks_for_state(
@@ -16,12 +48,22 @@ def _tasks_for_state(
     *,
     search: str | None = None,
     sort_by: str = "default",
+    priority_filter: TaskPriority | None = None,
+    unprioritized_only: bool = False,
+    tag_filter: str | None = None,
 ) -> list[Task]:
-    tasks = [task for task in board.active.values() if task.state is state]
-
-    if search:
-        needle = search.casefold()
-        tasks = [task for task in tasks if needle in task.text.casefold()]
+    tasks = [
+        task
+        for task in board.active.values()
+        if task.state is state
+        and _matches_filters(
+            task,
+            search=search,
+            priority_filter=priority_filter,
+            unprioritized_only=unprioritized_only,
+            tag_filter=tag_filter,
+        )
+    ]
 
     if sort_by == "default":
         ordered = board.ordered_tasks(state)
@@ -43,6 +85,9 @@ def visible_tasks(
     state_filter: TaskState | None = None,
     search: str | None = None,
     sort_by: str = "default",
+    priority_filter: TaskPriority | None = None,
+    unprioritized_only: bool = False,
+    tag_filter: str | None = None,
 ) -> list[Task]:
     states = (
         [state_filter]
@@ -51,20 +96,37 @@ def visible_tasks(
     )
     visible: list[Task] = []
     for state in states:
-        tasks = _tasks_for_state(board, state, search=search, sort_by=sort_by)
+        tasks = _tasks_for_state(
+            board,
+            state,
+            search=search,
+            sort_by=sort_by,
+            priority_filter=priority_filter,
+            unprioritized_only=unprioritized_only,
+            tag_filter=tag_filter,
+        )
         if state is TaskState.DONE:
             tasks = tasks[: config.limits.done]
         visible.extend(tasks)
     return visible
 
 
+def task_display_text(task: Task) -> str:
+    """Return compact task text including optional metadata badges."""
+    parts = [f"[{task.id}]"]
+    if task.priority is not None:
+        parts.append(f"!{task.priority.value}")
+    parts.append(task.text)
+    parts.extend(f"#{tag}" for tag in task.tags)
+    return " ".join(parts)
+
+
 def split_items(board: Board):
-    todos = [f"[{task.id}] {task.text}" for task in board.ordered_tasks(TaskState.TODO)]
+    todos = [task_display_text(task) for task in board.ordered_tasks(TaskState.TODO)]
     inprogs = [
-        f"[{task.id}] {task.text}"
-        for task in board.ordered_tasks(TaskState.IN_PROGRESS)
+        task_display_text(task) for task in board.ordered_tasks(TaskState.IN_PROGRESS)
     ]
-    dones = [f"[{task.id}] {task.text}" for task in board.ordered_tasks(TaskState.DONE)]
+    dones = [task_display_text(task) for task in board.ordered_tasks(TaskState.DONE)]
     return todos, inprogs, dones
 
 
@@ -80,6 +142,8 @@ def _task_payload(task: Task) -> dict[str, object]:
         "text": task.text,
         "created_at": format_timestamp(task.created_at),
         "modified_at": format_timestamp(task.modified_at),
+        "priority": task.priority.value if task.priority is not None else None,
+        "tags": list(task.tags),
     }
 
 
@@ -90,6 +154,9 @@ def format_json(
     state_filter: TaskState | None = None,
     search: str | None = None,
     sort_by: str = "default",
+    priority_filter: TaskPriority | None = None,
+    unprioritized_only: bool = False,
+    tag_filter: str | None = None,
 ) -> str:
     payload = {
         "tasks": [
@@ -100,6 +167,9 @@ def format_json(
                 state_filter=state_filter,
                 search=search,
                 sort_by=sort_by,
+                priority_filter=priority_filter,
+                unprioritized_only=unprioritized_only,
+                tag_filter=tag_filter,
             )
         ]
     }
@@ -117,14 +187,20 @@ def format_plain(
     state_filter: TaskState | None = None,
     search: str | None = None,
     sort_by: str = "default",
+    priority_filter: TaskPriority | None = None,
+    unprioritized_only: bool = False,
+    tag_filter: str | None = None,
 ) -> str:
-    lines = ["id\tstate\ttext\tcreated_at\tmodified_at"]
+    lines = ["id\tstate\ttext\tcreated_at\tmodified_at\tpriority\ttags"]
     for task in visible_tasks(
         config,
         board,
         state_filter=state_filter,
         search=search,
         sort_by=sort_by,
+        priority_filter=priority_filter,
+        unprioritized_only=unprioritized_only,
+        tag_filter=tag_filter,
     ):
         lines.append(
             "\t".join(
@@ -134,6 +210,8 @@ def format_plain(
                     _escape_plain_text(task.text),
                     format_timestamp(task.created_at),
                     format_timestamp(task.modified_at),
+                    task.priority.value if task.priority is not None else "",
+                    ",".join(task.tags),
                 ]
             )
         )
@@ -180,11 +258,20 @@ def _table_tasks(
     *,
     search: str | None = None,
     sort_by: str = "default",
+    priority_filter: TaskPriority | None = None,
+    unprioritized_only: bool = False,
+    tag_filter: str | None = None,
 ) -> dict[TaskState, list[Task]]:
     return {
-        state: _tasks_for_state(board, state, search=search, sort_by=sort_by)[
-            : config.limits.done if state is TaskState.DONE else None
-        ]
+        state: _tasks_for_state(
+            board,
+            state,
+            search=search,
+            sort_by=sort_by,
+            priority_filter=priority_filter,
+            unprioritized_only=unprioritized_only,
+            tag_filter=tag_filter,
+        )[: config.limits.done if state is TaskState.DONE else None]
         for state in [TaskState.TODO, TaskState.IN_PROGRESS, TaskState.DONE]
     }
 
@@ -198,37 +285,46 @@ def render_board(
     state_filter: TaskState | None = None,
     search: str | None = None,
     sort_by: str = "default",
+    priority_filter: TaskPriority | None = None,
+    unprioritized_only: bool = False,
+    tag_filter: str | None = None,
 ) -> None:
+    kwargs = {
+        "state_filter": state_filter,
+        "search": search,
+        "sort_by": sort_by,
+        "priority_filter": priority_filter,
+        "unprioritized_only": unprioritized_only,
+        "tag_filter": tag_filter,
+    }
     if output_format == "json":
-        print(
-            format_json(
-                config,
-                board,
-                state_filter=state_filter,
-                search=search,
-                sort_by=sort_by,
-            )
-        )
+        print(format_json(config, board, **kwargs))
         return
     if output_format == "plain":
-        print(
-            format_plain(
-                config,
-                board,
-                state_filter=state_filter,
-                search=search,
-                sort_by=sort_by,
-            )
-        )
+        print(format_plain(config, board, **kwargs))
         return
     if output_format != "table":
         raise ValueError(f"unsupported output format: {output_format}")
 
     console = Console(no_color=bool(os.environ.get("NO_COLOR")))
-    filtered = state_filter is not None or bool(search)
+    filtered = (
+        state_filter is not None
+        or bool(search)
+        or priority_filter is not None
+        or unprioritized_only
+        or tag_filter is not None
+    )
 
     if state_filter is not None:
-        tasks = _tasks_for_state(board, state_filter, search=search, sort_by=sort_by)
+        tasks = _tasks_for_state(
+            board,
+            state_filter,
+            search=search,
+            sort_by=sort_by,
+            priority_filter=priority_filter,
+            unprioritized_only=unprioritized_only,
+            tag_filter=tag_filter,
+        )
         if state_filter is TaskState.DONE:
             tasks = tasks[: config.limits.done]
         if not tasks:
@@ -241,11 +337,19 @@ def render_board(
             footer=f"kanbanTUI v.{version}",
         )
         for task in tasks:
-            table.add_row(f"[{task.id}] {task.text}")
+            table.add_row(escape(task_display_text(task)))
         console.print(table)
         return
 
-    columns = _table_tasks(config, board, search=search, sort_by=sort_by)
+    columns = _table_tasks(
+        config,
+        board,
+        search=search,
+        sort_by=sort_by,
+        priority_filter=priority_filter,
+        unprioritized_only=unprioritized_only,
+        tag_filter=tag_filter,
+    )
     if not any(columns.values()):
         if filtered:
             console.print("No matching tasks.")
@@ -274,7 +378,9 @@ def render_board(
         row = []
         for state in [TaskState.TODO, TaskState.IN_PROGRESS, TaskState.DONE]:
             tasks = columns[state]
-            row.append(f"[{tasks[index].id}] {tasks[index].text}" if index < len(tasks) else "")
+            row.append(
+                escape(task_display_text(tasks[index])) if index < len(tasks) else ""
+            )
         table.add_row(*row)
     console.print(table)
 
@@ -283,6 +389,7 @@ def render_history(board: Board) -> None:
     table = Table(show_header=True)
     table.add_column("id", justify="right")
     table.add_column("task")
+    table.add_column("metadata")
     table.add_column("archived / modified")
     table.add_column("created")
 
@@ -292,9 +399,14 @@ def render_history(board: Board) -> None:
         reverse=True,
     )
     for task in deleted_tasks:
+        metadata = []
+        if task.priority is not None:
+            metadata.append(f"!{task.priority.value}")
+        metadata.extend(f"#{tag}" for tag in task.tags)
         table.add_row(
             str(task.id),
-            task.text,
+            escape(task.text),
+            " ".join(metadata),
             format_timestamp(task.modified_at),
             format_timestamp(task.created_at),
         )
