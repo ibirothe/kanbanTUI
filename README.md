@@ -104,7 +104,7 @@ Launch the full-screen board with:
 kanban-tui tui
 ```
 
-The TUI uses the same configuration, datastore, validation, capacity limits, ordering rules, and mutation services as the CLI.
+The TUI uses the same configuration, datastore, validation, capacity limits, ordering rules, metadata, undo, and mutation services as the CLI.
 
 Keyboard controls:
 
@@ -113,10 +113,12 @@ Keyboard controls:
 - `Shift+↑` / `Shift+↓`: reprioritize within TODO or IN PROGRESS.
 - `a`: add a task.
 - `e`: edit the selected task.
+- `p`: cycle priority through none, low, normal, high, and urgent.
+- `t`: replace the selected task's comma-separated tag set.
 - `d`: archive the selected task.
 - `r`: restore an archived task by ID.
 - `u`: undo the last successful board mutation.
-- `/`: search/filter the live board.
+- `/`: search task text, tags, and priority.
 - `c`: clear the current search filter.
 - `?`: show keyboard help.
 - `q`: quit.
@@ -129,6 +131,10 @@ The CLI remains available for scripting and one-shot operations.
 kanban-tui show
 kanban-tui add Fix login bug
 kanban-tui edit 1 Fix login timeout handling
+kanban-tui priority 1 urgent
+kanban-tui tag add 1 backend
+kanban-tui tag remove 1 backend
+kanban-tui tag clear 1
 kanban-tui start 1
 kanban-tui done 1
 kanban-tui todo 1
@@ -144,11 +150,40 @@ kanban-tui undo
 
 TODO and IN PROGRESS tasks have persistent manual ordering. Use `move <id> top`, `move <id> bottom`, `move <id> before <other-id>`, or `move <id> after <other-id>` to reprioritize a task within its current column. Completed tasks remain ordered by completion time.
 
-`add` treats all words after the command as one task description. `edit` preserves task ID, state, creation time, and manual position. `history` lists archived tasks, and `restore` returns archived tasks to TODO while respecting configured capacity limits.
+`add` treats all words after the command as one task description. `edit` preserves task ID, state, creation time, manual position, priority, and tags. `history` lists archived tasks, and `restore` returns archived tasks to TODO while respecting configured capacity limits.
 
 Successful mutations use short task-centric messages such as `Added #12`, `Started #12`, and `Completed #12`. Rejected operations begin with `Error:` and return a non-zero exit status. For multi-ID commands, the command returns non-zero if any requested operation fails.
 
 Unique command prefixes are accepted only when unambiguous.
+
+## Priority and tags
+
+Metadata is intentionally lightweight and optional. A task may have one priority and zero or more tags.
+
+Priority values are `low`, `normal`, `high`, and `urgent`; clear a priority with:
+
+```bash
+kanban-tui priority 12 clear
+```
+
+Tags are normalized to lowercase and must be 1–32 characters containing letters, numbers, `-`, or `_`. Priority and tags do not automatically change manual task order.
+
+Table/TUI views render metadata inline, for example:
+
+```text
+[12] !urgent Fix production login #backend #bug
+```
+
+Filter metadata without mutating the board:
+
+```bash
+kanban-tui show --priority urgent
+kanban-tui show --priority none
+kanban-tui show --tag backend
+kanban-tui show --state todo --tag bug --priority high
+```
+
+`--search` also searches tag names and priority values in addition to task text.
 
 ## Undo
 
@@ -159,7 +194,7 @@ kanban-tui add Temporary task
 kanban-tui undo
 ```
 
-Undo covers task creation, edits, state changes, ordering, archive/restore operations, mixed successful batches, and imports. There is intentionally one undo level: after `undo`, there is no redo snapshot.
+Undo covers task creation, edits, metadata changes, state changes, ordering, archive/restore operations, mixed successful batches, and imports. There is intentionally one undo level: after `undo`, there is no redo snapshot.
 
 The interactive TUI exposes the same operation with `u`.
 
@@ -174,21 +209,21 @@ kanban-tui import board.json --mode merge
 kanban-tui import board.json --mode replace
 ```
 
-The versioned `kanbanTUI-board` JSON format contains every active and archived task, including IDs, states, timestamps, and manual positions. It is independent of the DONE display limit and `show` filters.
+The versioned `kanbanTUI-board` JSON format contains every active and archived task, including IDs, states, timestamps, manual positions, priority, and tags. It is independent of the DONE display limit and `show` filters.
 
 `merge` preserves the current board and appends imported tasks, but rejects task-ID conflicts. `replace` replaces the selected board with the imported board. Both modes validate the complete import and configured TODO/WIP capacities before writing. A successful import can be reverted with `undo`.
 
 ## Board view and filters
 
-The table view renders one task per row, wraps long descriptions, shows TODO/WIP capacity, marks full columns, and provides actionable empty states.
+The table view renders one task per row, wraps long descriptions, shows TODO/WIP capacity, marks full columns, displays metadata, and provides actionable empty states.
 
-`show` supports state and text filtering without changing the board:
+`show` supports state, text, priority, and tag filtering without changing the board:
 
 ```bash
 kanban-tui show --state todo
-kanban-tui show --state inprogress
 kanban-tui show --search login
-kanban-tui show --state todo --search login
+kanban-tui show --priority urgent
+kanban-tui show --tag backend
 ```
 
 Search is case-insensitive. Manual task order is the default, but temporary sort views are available:
@@ -210,8 +245,8 @@ kanban-tui show --format json
 ```
 
 - `table` is the default Rich terminal view.
-- `plain` emits deterministic tab-separated text without color codes.
-- `json` emits structured task data with timezone-aware ISO 8601 timestamps.
+- `plain` emits deterministic tab-separated text, including priority and tags, without color codes.
+- `json` emits structured task data with timezone-aware ISO 8601 timestamps, priority, and tags.
 
 Filters and sorting apply consistently to all three formats. All formats use the configured completed-task display limit. Rich output honors `NO_COLOR`.
 
