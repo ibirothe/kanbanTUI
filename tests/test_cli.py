@@ -143,6 +143,7 @@ def test_missing_operands_use_click_usage_errors(runner, write_config):
     assert runner.invoke(main, ["edit", "1"]).exit_code == 2
     assert runner.invoke(main, ["promote"]).exit_code == 2
     assert runner.invoke(main, ["restore"]).exit_code == 2
+    assert runner.invoke(main, ["move", "1"]).exit_code == 2
 
 
 def test_repaint_outputs_board(runner, write_config):
@@ -183,6 +184,31 @@ def test_mixed_batch_returns_failure_if_any_item_fails(runner, write_config):
     assert result.exit_code == 1
     assert "Promoting task 1 to in-progress." in result.output
     assert "Can not promote, in-progress limit of 1 reached." in result.output
+
+
+def test_move_reorders_tasks_and_persists_across_show(runner, write_config):
+    write_config()
+    runner.invoke(main, ["add", "one"])
+    runner.invoke(main, ["add", "two"])
+    runner.invoke(main, ["add", "three"])
+
+    move_result = runner.invoke(main, ["move", "3", "top"])
+    show_result = runner.invoke(main, ["show", "--format", "json"])
+    payload = json.loads(show_result.output)
+
+    assert move_result.exit_code == 0
+    assert "Moved task 3 top." in move_result.output
+    assert [item["id"] for item in payload["tasks"]] == [3, 1, 2]
+
+
+def test_move_before_requires_reference_id(runner, write_config):
+    write_config()
+    runner.invoke(main, ["add", "task"])
+
+    result = runner.invoke(main, ["move", "1", "before"])
+
+    assert result.exit_code == 2
+    assert "requires REFERENCE_ID" in result.output
 
 
 def test_show_reads_existing_data_without_writer_lock(runner, write_config):
