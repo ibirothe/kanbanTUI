@@ -94,6 +94,17 @@ def read_config(ctx, param, value):
     return value
 
 
+def wip_limit_reached(config, dd):
+    """Return True when another transition into WIP would exceed its limit."""
+    if 'limits' not in config or 'wip' not in config['limits']:
+        return False
+
+    wip_count = sum(
+        1 for item in dd['data'].values() if item[0] == 'inprogress'
+    )
+    return int(config['limits']['wip']) <= wip_count
+
+
 @click.version_option(VERSION)
 @click.command(cls=AliasedGroup, default='show', default_if_no_args=True)
 def clikan():
@@ -183,7 +194,6 @@ def promote(ids):
     """Promote task"""
     config = read_config_yaml()
     dd = read_data(config)
-    todos, inprogs, dones = split_items(config, dd)
 
     for id in ids:
         try:
@@ -191,8 +201,7 @@ def promote(ids):
             if item is None:
                 click.echo('No existing task with that id: %s' % id)
             elif item[0] == 'todo':
-                if ('limits' in config and 'wip' in config['limits'] and
-                        int(config['limits']['wip']) <= len(inprogs)):
+                if wip_limit_reached(config, dd):
                     click.echo(
                         'Can not promote, in-progress limit of %s reached.'
                         % config['limits']['wip']
@@ -230,10 +239,16 @@ def regress(ids):
             if item is None:
                 click.echo('No existing task with id: %s' % id)
             elif item[0] == 'done':
-                click.echo('Regressing task %s to in-progress.' % id)
-                dd['data'][int(id)] = [
-                    'inprogress', item[1], timestamp(), item[3]
-                ]
+                if wip_limit_reached(config, dd):
+                    click.echo(
+                        'Can not regress, in-progress limit of %s reached.'
+                        % config['limits']['wip']
+                    )
+                else:
+                    click.echo('Regressing task %s to in-progress.' % id)
+                    dd['data'][int(id)] = [
+                        'inprogress', item[1], timestamp(), item[3]
+                    ]
             elif item[0] == 'inprogress':
                 click.echo('Regressing task %s to todo.' % id)
                 dd['data'][int(id)] = ['todo', item[1], timestamp(), item[3]]
