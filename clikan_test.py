@@ -1,11 +1,13 @@
 #!/usr/bin/env python
 
+from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 
 import pytest
 import yaml
 from click.testing import CliRunner
 
+import clikan as clikan_module
 from clikan import clikan, show
 
 
@@ -55,6 +57,27 @@ def test_command_version():
 
     assert result.exit_code == 0
     assert "clikan, version {}".format(version) in result.output
+
+
+def test_get_version_uses_package_metadata(monkeypatch):
+    monkeypatch.setattr(
+        clikan_module,
+        "package_version",
+        lambda package_name: "9.9.9",
+    )
+
+    assert clikan_module.get_version() == "9.9.9"
+
+
+def test_get_version_falls_back_to_version_file(monkeypatch):
+    expected = Path(__file__).with_name("VERSION").read_text(encoding="utf-8").strip()
+
+    def package_not_installed(package_name):
+        raise PackageNotFoundError(package_name)
+
+    monkeypatch.setattr(clikan_module, "package_version", package_not_installed)
+
+    assert clikan_module.get_version() == expected
 
 
 def test_command_configure(isolated_clikan_home):
