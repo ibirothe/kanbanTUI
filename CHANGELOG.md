@@ -34,6 +34,18 @@ Current maintained kanbanTUI baseline.
 - added one-level atomic undo for successful mutations, including imports and metadata edits;
 - archived history can be inspected and restored with metadata preserved.
 
+### Stabilization
+
+- made datastore reads side-effect free: missing boards remain absent until a mutation actually succeeds;
+- added explicit `completed_at` semantics so DONE ordering reflects completion time rather than later text or metadata edits;
+- retained backward compatibility by deriving `completed_at` from `modified_at` for legacy DONE records;
+- added `completed_at` to structured view output and complete transfer data;
+- changed merge import to deterministically remap imported IDs that collide with existing active or archived history instead of rejecting the merge;
+- preserved non-conflicting imported IDs and report remapped IDs to the user;
+- made already-satisfied reorder requests and imports with no effective changes true semantic no-ops;
+- semantic no-ops no longer update timestamps, write the datastore, or consume the single undo snapshot;
+- added regression coverage for first-use persistence, completion ordering, transfer ID remapping, and undo preservation across no-op operations.
+
 ### Maintainer
 
 Pascal Rothe <ibirothe@gmail.com>
