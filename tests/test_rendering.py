@@ -22,12 +22,35 @@ def config(*, done_limit: int = 10):
     )
 
 
-def task(task_id: int, state: TaskState, text: str, hour: int):
-    return Task(task_id, state, text, stamp(hour), stamp(8))
+def task(
+    task_id: int,
+    state: TaskState,
+    text: str,
+    hour: int,
+    *,
+    position: int = 0,
+):
+    return Task(task_id, state, text, stamp(hour), stamp(8), position=position)
 
 
 def done(task_id: int, text: str, hour: int):
     return task(task_id, TaskState.DONE, text, hour)
+
+
+def test_active_tasks_are_sorted_by_manual_position():
+    board = Board(
+        active={
+            1: task(1, TaskState.TODO, "second", 9, position=2),
+            2: task(2, TaskState.TODO, "first", 9, position=1),
+            3: task(3, TaskState.IN_PROGRESS, "doing second", 9, position=2),
+            4: task(4, TaskState.IN_PROGRESS, "doing first", 9, position=1),
+        }
+    )
+
+    todos, inprogs, _ = split_items(board)
+
+    assert todos == ["[2] first", "[1] second"]
+    assert inprogs == ["[4] doing first", "[3] doing second"]
 
 
 def test_done_tasks_are_sorted_by_modified_time_newest_first():
@@ -61,8 +84,8 @@ def test_done_limit_selects_newest_completed_tasks():
 def test_json_output_is_structured_and_deterministic():
     board = Board(
         active={
-            3: task(3, TaskState.TODO, "todo three", 9),
-            1: task(1, TaskState.TODO, "todo one", 9),
+            3: task(3, TaskState.TODO, "todo three", 9, position=2),
+            1: task(1, TaskState.TODO, "todo one", 9, position=1),
             4: task(4, TaskState.IN_PROGRESS, "doing", 10),
             2: done(2, "done", 12),
         }
