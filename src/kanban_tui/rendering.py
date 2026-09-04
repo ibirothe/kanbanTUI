@@ -8,14 +8,7 @@ from .models import AppConfig, Board, Task, TaskState, format_timestamp
 
 
 def _tasks_for_state(board: Board, state: TaskState) -> list[Task]:
-    tasks = [task for task in board.active.values() if task.state is state]
-    if state is TaskState.DONE:
-        return sorted(
-            tasks,
-            key=lambda task: (task.modified_at, task.id),
-            reverse=True,
-        )
-    return sorted(tasks, key=lambda task: task.id)
+    return board.ordered_tasks(state)
 
 
 def visible_tasks(config: AppConfig, board: Board) -> list[Task]:
