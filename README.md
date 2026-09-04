@@ -79,7 +79,7 @@ Email: `ibirothe@gmail.com`
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+MIT. See [`LICENSE`](LICENSE). The license file retains the original copyright notice required by the upstream MIT grant.
 
 ## Support
 
