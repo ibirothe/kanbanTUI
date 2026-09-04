@@ -87,9 +87,12 @@ def _validate_task_text(config: AppConfig, raw_text: str) -> tuple[str | None, s
 
 def _parse_task_id(task_id: str) -> tuple[int | None, str | None]:
     try:
-        return int(task_id), None
+        numeric_id = int(task_id)
     except (TypeError, ValueError):
         return None, f"Error: invalid task ID {task_id!r}."
+    if numeric_id < 1:
+        return None, f"Error: invalid task ID {task_id!r}."
+    return numeric_id, None
 
 
 def _active_task(board: Board, task_id: str) -> tuple[Task | None, str | None]:
