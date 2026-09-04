@@ -37,3 +37,22 @@ def render_board(config: AppConfig, board: Board, version: str) -> None:
     )
     table.add_row("\n".join(todos), "\n".join(inprogs), "\n".join(dones))
     Console().print(table)
+
+
+def render_history(board: Board) -> None:
+    table = Table(show_header=True)
+    table.add_column("id", justify="right")
+    table.add_column("task")
+    table.add_column("deleted / modified")
+    table.add_column("created")
+
+    for task_id in sorted(board.deleted, reverse=True):
+        task = board.deleted[task_id]
+        table.add_row(
+            str(task_id),
+            task.text,
+            task.modified_at,
+            task.created_at,
+        )
+
+    Console().print(table)
