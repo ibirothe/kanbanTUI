@@ -1,7 +1,42 @@
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any
+
+
+LEGACY_TIMESTAMP_FORMAT = "%Y-%b-%d %H:%M:%S"
+
+
+def _local_timezone():
+    return datetime.now().astimezone().tzinfo or timezone.utc
+
+
+def parse_timestamp(value: Any) -> datetime:
+    """Parse current ISO timestamps and the legacy clikan timestamp format."""
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            try:
+                parsed = datetime.strptime(value, LEGACY_TIMESTAMP_FORMAT)
+            except ValueError as exc:
+                raise ValueError(f"invalid timestamp {value!r}") from exc
+    else:
+        raise ValueError(f"invalid timestamp {value!r}")
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=_local_timezone())
+    return parsed
+
+
+def format_timestamp(value: datetime) -> str:
+    """Serialize a timestamp as timezone-aware ISO 8601 to second precision."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=_local_timezone())
+    return value.isoformat(timespec="seconds")
 
 
 class TaskState(str, Enum):
@@ -16,8 +51,12 @@ class Task:
     id: int
     state: TaskState
     text: str
-    modified_at: str
-    created_at: str
+    modified_at: datetime
+    created_at: datetime
+
+    def __post_init__(self) -> None:
+        self.modified_at = parse_timestamp(self.modified_at)
+        self.created_at = parse_timestamp(self.created_at)
 
     @classmethod
     def from_record(cls, task_id: int, record: Any, *, deleted: bool = False) -> "Task":
@@ -47,16 +86,27 @@ class Task:
         if state not in allowed:
             raise ValueError(f"task {task_id} has invalid state {state.value!r}")
 
+        try:
+            modified_at = parse_timestamp(record[2])
+            created_at = parse_timestamp(record[3])
+        except ValueError as exc:
+            raise ValueError(f"task {task_id} has an invalid timestamp: {exc}") from exc
+
         return cls(
             id=task_id,
             state=state,
             text=record[1],
-            modified_at=str(record[2]),
-            created_at=str(record[3]),
+            modified_at=modified_at,
+            created_at=created_at,
         )
 
     def to_record(self) -> list[str]:
-        return [self.state.value, self.text, self.modified_at, self.created_at]
+        return [
+            self.state.value,
+            self.text,
+            format_timestamp(self.modified_at),
+            format_timestamp(self.created_at),
+        ]
 
 
 @dataclass
