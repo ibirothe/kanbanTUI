@@ -34,7 +34,7 @@ Or create `~/.clikan.yaml` manually. See [`examples/clikan.yaml`](examples/clika
 
 Supported settings:
 
-- `clikan_data`: datastore path.
+- `clikan_data`: datastore path. Relative paths are resolved relative to the configuration file directory.
 - `limits.todo`: optional TODO capacity.
 - `limits.wip`: optional in-progress capacity.
 - `limits.done`: maximum done items displayed; default `10`.
@@ -46,16 +46,21 @@ Supported settings:
 ```bash
 clikan show
 clikan add Fix login bug
+clikan edit 1 Fix login timeout handling
 clikan promote 1
 clikan regress 1
 clikan delete 1
+clikan history
+clikan restore 1
 ```
 
-`add` treats all words after the command as one task description, so quoting normal task text is optional. Empty task text is rejected.
+`add` treats all words after the command as one task description, so quoting normal task text is optional. `edit` uses the same text normalization and length rules while preserving the task ID, state, and creation timestamp. Deleted tasks cannot be edited directly.
+
+`history` shows the deleted-task archive. `restore` moves deleted tasks back to TODO with their original IDs and creation timestamps; restoration respects the configured TODO capacity.
 
 Commands that require task IDs or task text report a standard Click usage error when their operand is missing. Rejected task operations such as invalid IDs, unknown IDs, capacity-limit failures, or invalid task text return a non-zero exit code. For commands that accept multiple IDs, the command returns non-zero if any requested operation fails, even when other items succeed.
 
-Unique command prefixes are accepted, so `s`, `a`, `p`, and `d` work for `show`, `add`, `promote`, and `delete` respectively.
+Unique command prefixes are accepted. `s`, `a`, `p`, and `d` remain the short forms for `show`, `add`, `promote`, and `delete` respectively.
 
 ## Project structure
 
