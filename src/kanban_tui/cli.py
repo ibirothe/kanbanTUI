@@ -27,7 +27,13 @@ from .services import (
     reorder_task,
     restore_tasks,
 )
-from .storage import datastore_lock, read_data, write_data
+from .storage import datastore_lock, read_data, undo_last_change, write_data
+from .transfer import (
+    merge_boards,
+    read_export,
+    validate_board_capacity,
+    write_export,
+)
 
 
 class PrefixGroup(DefaultGroup):
@@ -75,6 +81,11 @@ def _echo_messages(messages: list[str]) -> None:
         click.echo(message)
 
 
+def _persist_operation(config, board, result: OperationResult) -> None:
+    if result.succeeded:
+        write_data(config, board, snapshot_previous=True)
+
+
 def _complete_operation(result: OperationResult, config) -> None:
     _echo_messages(result.messages)
     if result.succeeded and config.repaint:
@@ -88,7 +99,7 @@ def _run_state_command(ids: tuple[str, ...], target_state: TaskState) -> None:
     with datastore_lock(config):
         board = read_data(config)
         result = move_tasks_to_state(config, board, ids, target_state)
-        write_data(config, board)
+        _persist_operation(config, board, result)
     _complete_operation(result, config)
 
 
@@ -156,7 +167,7 @@ def board_list():
     default_path = get_config_path()
     entries: list[tuple[str, Path]] = []
 
-    if default_path.exists() or effective_path == default_path:
+    if default_path.exists():
         entries.append(("default", default_path))
     entries.extend(
         (name, get_board_config_path(name)) for name in list_named_boards()
@@ -220,7 +231,7 @@ def add(task_words):
     with datastore_lock(config):
         board = read_data(config)
         result = add_tasks(config, board, [task_text])
-        write_data(config, board)
+        _persist_operation(config, board, result)
     _complete_operation(result, config)
 
 
@@ -234,7 +245,7 @@ def edit(task_id, task_words):
     with datastore_lock(config):
         board = read_data(config)
         result = edit_task(config, board, task_id, task_text)
-        write_data(config, board)
+        _persist_operation(config, board, result)
     _complete_operation(result, config)
 
 
@@ -246,7 +257,7 @@ def delete(ids):
     with datastore_lock(config):
         board = read_data(config)
         result = delete_tasks(board, ids)
-        write_data(config, board)
+        _persist_operation(config, board, result)
     _complete_operation(result, config)
 
 
@@ -258,7 +269,7 @@ def restore(ids):
     with datastore_lock(config):
         board = read_data(config)
         result = restore_tasks(config, board, ids)
-        write_data(config, board)
+        _persist_operation(config, board, result)
     _complete_operation(result, config)
 
 
@@ -291,7 +302,7 @@ def promote(ids):
     with datastore_lock(config):
         board = read_data(config)
         result = promote_tasks(config, board, ids)
-        write_data(config, board)
+        _persist_operation(config, board, result)
     _complete_operation(result, config)
 
 
@@ -303,7 +314,7 @@ def regress(ids):
     with datastore_lock(config):
         board = read_data(config)
         result = regress_tasks(config, board, ids)
-        write_data(config, board)
+        _persist_operation(config, board, result)
     _complete_operation(result, config)
 
 
@@ -322,8 +333,57 @@ def move(task_id, target, reference_id):
     with datastore_lock(config):
         board = read_data(config)
         result = reorder_task(board, task_id, target, reference_id)
-        write_data(config, board)
+        _persist_operation(config, board, result)
     _complete_operation(result, config)
+
+
+@main.command(name="export")
+@click.argument("path", type=click.Path(path_type=Path, dir_okay=False))
+@click.option("--force", is_flag=True, help="Overwrite an existing export file.")
+def export_command(path, force):
+    """Export the complete selected board as JSON."""
+    config = _read_config()
+    board = read_data(config, initialize_missing=False)
+    exported_path = write_export(path, board, overwrite=force)
+    click.echo(f"Exported board to {exported_path}")
+
+
+@main.command(name="import")
+@click.argument(
+    "path",
+    type=click.Path(path_type=Path, dir_okay=False, exists=True),
+)
+@click.option(
+    "--mode",
+    type=click.Choice(["merge", "replace"], case_sensitive=False),
+    default="merge",
+    show_default=True,
+)
+def import_command(path, mode):
+    """Import a complete board export."""
+    imported = read_export(path)
+    config = _read_config()
+
+    with datastore_lock(config):
+        current = read_data(config, initialize_missing=False)
+        target = imported if mode.lower() == "replace" else merge_boards(current, imported)
+        validate_board_capacity(config, target)
+        write_data(config, target, snapshot_previous=True)
+
+    click.echo(f"Imported board from {path.resolve()} ({mode.lower()}).")
+    if config.repaint:
+        display()
+
+
+@main.command()
+def undo():
+    """Undo the last successful board mutation."""
+    config = _read_config()
+    with datastore_lock(config):
+        undo_last_change(config)
+    click.echo("Undid last board change.")
+    if config.repaint:
+        display()
 
 
 def display(
