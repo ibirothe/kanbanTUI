@@ -14,10 +14,11 @@ Current maintained kanbanTUI baseline.
 
 ### UX
 
-- added the full-screen Textual TUI with keyboard navigation, task editing, state movement, ordering, search, archive/restore, and undo;
+- added the full-screen Textual TUI with keyboard navigation, task editing, state movement, ordering, metadata, search, archive/restore, and undo;
 - added persistent manual ordering for TODO and IN PROGRESS tasks;
+- added optional task priority (`low`, `normal`, `high`, `urgent`) and normalized tags, exposed consistently in CLI/TUI/rendering/filtering;
 - added explicit `start`, `done`, and `todo` state commands;
-- added improved capacity-aware table rendering, search/state filters, and deterministic view sorting;
+- added improved capacity-aware table rendering, search/state/metadata filters, and deterministic view sorting;
 - added named boards with `--board`, `board create`, and `board list`;
 - added `config path`, `config show`, and validated `config set` commands;
 - standardized concise task-centric command feedback.
@@ -27,9 +28,11 @@ Current maintained kanbanTUI baseline.
 - task IDs remain unique across active and archived history;
 - TODO/WIP invariants are enforced on all relevant transitions;
 - timestamps are timezone-aware ISO 8601 on new writes;
+- optional metadata is stored in a backward-compatible sixth task-record field;
+- complete JSON transfers preserve priority and tags while remaining compatible with metadata-free version-1 exports;
 - added complete versioned JSON board export/import with merge and replace modes;
-- added one-level atomic undo for successful mutations, including imports;
-- deleted history can be inspected and restored.
+- added one-level atomic undo for successful mutations, including imports and metadata edits;
+- archived history can be inspected and restored with metadata preserved.
 
 ### Maintainer
 
