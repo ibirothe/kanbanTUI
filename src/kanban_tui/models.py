@@ -120,11 +120,18 @@ class Task:
                 "TODO and IN PROGRESS tasks cannot have a completion timestamp"
             )
 
-        self.position = _strict_integer(
-            self.position if self.position != 0 else self.id,
-            minimum=1,
-            error="task position must be a positive integer",
-        )
+        if (
+            isinstance(self.position, int)
+            and not isinstance(self.position, bool)
+            and self.position == 0
+        ):
+            self.position = self.id
+        else:
+            self.position = _strict_integer(
+                self.position,
+                minimum=1,
+                error="task position must be a positive integer",
+            )
 
         if self.priority is not None and not isinstance(self.priority, TaskPriority):
             try:
@@ -328,6 +335,10 @@ class Board:
                     raise ValueError(
                         f"{collection_name} task key {task_id} does not match task id {task.id}"
                     )
+                if collection_name == "active" and task.state is TaskState.DELETED:
+                    raise ValueError("active tasks cannot have deleted state")
+                if collection_name == "deleted" and task.state is not TaskState.DELETED:
+                    raise ValueError("deleted tasks must have deleted state")
 
         overlapping_ids = set(self.active).intersection(self.deleted)
         if overlapping_ids:
