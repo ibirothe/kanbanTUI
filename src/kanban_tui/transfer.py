@@ -29,6 +29,9 @@ def _task_payload(task: Task) -> dict[str, object]:
         "text": task.text,
         "created_at": format_timestamp(task.created_at),
         "modified_at": format_timestamp(task.modified_at),
+        "completed_at": (
+            format_timestamp(task.completed_at) if task.completed_at is not None else None
+        ),
         "position": task.position,
         "priority": task.priority.value if task.priority is not None else None,
         "tags": list(task.tags),
@@ -92,6 +95,10 @@ def _parse_task(raw: Any, *, archived: bool) -> Task:
     try:
         created_at = parse_timestamp(raw.get("created_at"))
         modified_at = parse_timestamp(raw.get("modified_at"))
+        raw_completed_at = raw.get("completed_at")
+        completed_at = (
+            parse_timestamp(raw_completed_at) if raw_completed_at is not None else None
+        )
         task = Task(
             id=task_id,
             state=state,
@@ -101,6 +108,7 @@ def _parse_task(raw: Any, *, archived: bool) -> Task:
             position=position,
             priority=priority,
             tags=tuple(raw_tags),
+            completed_at=completed_at,
         )
     except ValueError as exc:
         raise ValueError(f"task {task_id} has invalid metadata or timestamp: {exc}") from exc
