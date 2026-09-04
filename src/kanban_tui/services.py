@@ -2,7 +2,14 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from .models import AppConfig, Board, Task, TaskState
+from .models import (
+    AppConfig,
+    Board,
+    Task,
+    TaskPriority,
+    TaskState,
+    normalize_tag,
+)
 
 
 @dataclass
@@ -346,7 +353,11 @@ def reorder_task(
         result.failure("Error: completed tasks are ordered by completion time.")
         return result
 
-    ordered = [candidate for candidate in board.ordered_tasks(task.state) if candidate.id != task.id]
+    ordered = [
+        candidate
+        for candidate in board.ordered_tasks(task.state)
+        if candidate.id != task.id
+    ]
 
     if target == "top":
         insert_at = 0
@@ -383,4 +394,119 @@ def reorder_task(
         candidate.position = position
     task.modified_at = timestamp()
     result.success(success_message)
+    return result
+
+
+def set_task_priority(
+    board: Board,
+    task_id: str,
+    priority: TaskPriority | str | None,
+) -> OperationResult:
+    """Set or clear one active task priority without changing manual order."""
+    result = OperationResult()
+    task, error = _active_task(board, task_id)
+    if error is not None:
+        result.failure(error)
+        return result
+    assert task is not None
+
+    normalized: TaskPriority | None
+    if priority is None:
+        normalized = None
+    elif isinstance(priority, TaskPriority):
+        normalized = priority
+    else:
+        try:
+            normalized = TaskPriority(priority)
+        except ValueError:
+            result.failure(f"Error: invalid priority {priority!r}.")
+            return result
+
+    if task.priority is normalized:
+        label = normalized.value if normalized is not None else "none"
+        result.failure(f"Error: task #{task.id} priority is already {label}.")
+        return result
+
+    task.priority = normalized
+    task.modified_at = timestamp()
+    if normalized is None:
+        result.success(f"Cleared priority for #{task.id}.")
+    else:
+        result.success(f"Set #{task.id} priority to {normalized.value}.")
+    return result
+
+
+def set_task_tags(board: Board, task_id: str, tags: Iterable[str]) -> OperationResult:
+    """Replace the complete tag set for one active task."""
+    result = OperationResult()
+    task, error = _active_task(board, task_id)
+    if error is not None:
+        result.failure(error)
+        return result
+    assert task is not None
+
+    try:
+        normalized = tuple(sorted({normalize_tag(tag) for tag in tags}))
+    except ValueError as exc:
+        result.failure(f"Error: {exc}.")
+        return result
+
+    if task.tags == normalized:
+        result.failure(f"Error: task #{task.id} tags are unchanged.")
+        return result
+
+    task.tags = normalized
+    task.modified_at = timestamp()
+    if normalized:
+        result.success(f"Set #{task.id} tags: {', '.join(normalized)}.")
+    else:
+        result.success(f"Cleared tags for #{task.id}.")
+    return result
+
+
+def update_task_tag(
+    board: Board,
+    task_id: str,
+    action: str,
+    raw_tag: str | None = None,
+) -> OperationResult:
+    """Add, remove, or clear tags for one active task."""
+    result = OperationResult()
+    task, error = _active_task(board, task_id)
+    if error is not None:
+        result.failure(error)
+        return result
+    assert task is not None
+
+    if action == "clear":
+        return set_task_tags(board, task_id, [])
+    if raw_tag is None:
+        result.failure(f"Error: tag {action} requires a tag value.")
+        return result
+
+    try:
+        tag = normalize_tag(raw_tag)
+    except ValueError as exc:
+        result.failure(f"Error: {exc}.")
+        return result
+
+    tags = set(task.tags)
+    if action == "add":
+        if tag in tags:
+            result.failure(f"Error: task #{task.id} already has tag #{tag}.")
+            return result
+        tags.add(tag)
+    elif action == "remove":
+        if tag not in tags:
+            result.failure(f"Error: task #{task.id} does not have tag #{tag}.")
+            return result
+        tags.remove(tag)
+    else:
+        result.failure("Error: tag action must be add, remove, or clear.")
+        return result
+
+    task.tags = tuple(sorted(tags))
+    task.modified_at = timestamp()
+    verb = "Added" if action == "add" else "Removed"
+    result.success(f"{verb} tag #{tag} {'to' if action == 'add' else 'from'} #{task.id}.")
     return result
