@@ -4,7 +4,13 @@ from click_default_group import DefaultGroup
 from . import VERSION
 from .config import create_default_config, get_config_path, read_config
 from .rendering import render_board
-from .services import add_tasks, delete_tasks, promote_tasks, regress_tasks
+from .services import (
+    OperationResult,
+    add_tasks,
+    delete_tasks,
+    promote_tasks,
+    regress_tasks,
+)
 from .storage import datastore_lock, read_data, write_data
 
 
@@ -28,14 +34,17 @@ class PrefixGroup(DefaultGroup):
         ctx.fail("Too many matches: %s" % ", ".join(sorted(matches)))
 
 
-def _echo_messages(messages):
+def _echo_messages(messages: list[str]) -> None:
     for message in messages:
         click.echo(message)
 
 
-def _repaint_if_enabled(config):
-    if config.repaint:
+def _complete_operation(result: OperationResult, config) -> None:
+    _echo_messages(result.messages)
+    if result.succeeded and config.repaint:
         display()
+    if result.failed:
+        raise click.exceptions.Exit(1)
 
 
 @click.version_option(VERSION)
@@ -58,55 +67,52 @@ def configure():
 
 
 @clikan.command()
-@click.argument("tasks", nargs=-1)
-def add(tasks):
-    """Add tasks in todo."""
+@click.argument("task_words", nargs=-1, required=True)
+def add(task_words):
+    """Add one task to todo."""
     config = read_config()
+    task_text = " ".join(task_words)
     with datastore_lock(config):
         board = read_data(config)
-        messages = add_tasks(config, board, tasks)
+        result = add_tasks(config, board, [task_text])
         write_data(config, board)
-    _echo_messages(messages)
-    _repaint_if_enabled(config)
+    _complete_operation(result, config)
 
 
 @clikan.command()
-@click.argument("ids", nargs=-1)
+@click.argument("ids", nargs=-1, required=True)
 def delete(ids):
     """Delete tasks."""
     config = read_config()
     with datastore_lock(config):
         board = read_data(config)
-        messages = delete_tasks(board, ids)
+        result = delete_tasks(board, ids)
         write_data(config, board)
-    _echo_messages(messages)
-    _repaint_if_enabled(config)
+    _complete_operation(result, config)
 
 
 @clikan.command()
-@click.argument("ids", nargs=-1)
+@click.argument("ids", nargs=-1, required=True)
 def promote(ids):
     """Promote tasks."""
     config = read_config()
     with datastore_lock(config):
         board = read_data(config)
-        messages = promote_tasks(config, board, ids)
+        result = promote_tasks(config, board, ids)
         write_data(config, board)
-    _echo_messages(messages)
-    _repaint_if_enabled(config)
+    _complete_operation(result, config)
 
 
 @clikan.command()
-@click.argument("ids", nargs=-1)
+@click.argument("ids", nargs=-1, required=True)
 def regress(ids):
     """Regress tasks."""
     config = read_config()
     with datastore_lock(config):
         board = read_data(config)
-        messages = regress_tasks(config, board, ids)
+        result = regress_tasks(config, board, ids)
         write_data(config, board)
-    _echo_messages(messages)
-    _repaint_if_enabled(config)
+    _complete_operation(result, config)
 
 
 def display():
