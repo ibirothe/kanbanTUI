@@ -1,6 +1,6 @@
 # kanbanTUI
 
-A terminal-based personal Kanban board for managing TODO, in-progress, completed, and deleted tasks.
+A terminal-based personal Kanban board for managing TODO, in-progress, completed, and archived tasks.
 
 ## Requirements
 
@@ -63,18 +63,25 @@ kanban-tui --config ~/boards/work.yaml show
 kanban-tui show
 kanban-tui add Fix login bug
 kanban-tui edit 1 Fix login timeout handling
-kanban-tui promote 1
-kanban-tui regress 1
+kanban-tui start 1
+kanban-tui done 1
+kanban-tui todo 1
+kanban-tui move 1 top
+kanban-tui move 3 before 1
 kanban-tui delete 1
 kanban-tui history
 kanban-tui restore 1
 ```
 
-`add` treats all words after the command as one task description. `edit` preserves task ID, state, and creation time. `history` lists deleted tasks, and `restore` returns deleted tasks to TODO while respecting configured capacity limits.
+`start`, `done`, and `todo` move tasks directly to the requested state. The older `promote` and `regress` commands remain available as one-step transition shortcuts.
 
-Commands that require operands use standard Click usage errors when operands are missing. Rejected operations return a non-zero exit status. For multi-ID commands, the command returns non-zero if any requested operation fails.
+TODO and IN PROGRESS tasks have persistent manual ordering. Use `move <id> top`, `move <id> bottom`, `move <id> before <other-id>`, or `move <id> after <other-id>` to reprioritize a task within its current column. Completed tasks remain ordered by completion time.
 
-Unique command prefixes are accepted when unambiguous.
+`add` treats all words after the command as one task description. `edit` preserves task ID, state, creation time, and manual position. `history` lists archived tasks, and `restore` returns archived tasks to TODO while respecting configured capacity limits.
+
+Successful mutations use short task-centric messages such as `Added #12`, `Started #12`, and `Completed #12`. Rejected operations begin with `Error:` and return a non-zero exit status. For multi-ID commands, the command returns non-zero if any requested operation fails.
+
+Unique command prefixes are accepted only when unambiguous.
 
 ## Output formats
 
