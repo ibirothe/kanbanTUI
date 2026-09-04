@@ -4,84 +4,94 @@
 
 Production code lives under `src/kanban_tui/`.
 
-- `__init__.py` — application version lookup.
-- `cli.py` — Click commands, command-prefix handling, config selection, and user-facing wiring.
+- `__init__.py` — package version lookup.
+- `cli.py` — Click command definitions, command-prefix handling, global config selection, and user-facing wiring.
 - `config.py` — config path resolution, YAML parsing, defaults, and validation.
 - `models.py` — typed domain models: `TaskState`, `Task`, `Limits`, `AppConfig`, and `Board`.
-- `services.py` — task operations and board invariants.
-- `storage.py` — datastore locking, YAML conversion, and atomic writes.
-- `rendering.py` — Rich table, plain text, JSON, and history rendering.
+- `services.py` — task creation, deletion, editing, state transitions, ordering, and board business rules.
+- `storage.py` — datastore locking, YAML deserialization/serialization, and atomic writes.
+- `rendering.py` — Rich, plain, JSON, filtering, sorting, and history rendering.
+- `tui.py` — Textual full-screen interface that reuses the same config, services, storage, and rendering helpers.
 
-Tests live under `tests/` and mirror these responsibilities. Shared temporary-home/config fixtures live in `tests/conftest.py`, and multi-board behavior is covered in `tests/test_multiboard.py`.
+Tests live under `tests/` and mirror these responsibilities where practical. Shared temporary-home/config fixtures live in `tests/conftest.py`; explicit multi-board behavior is covered separately in `tests/test_multiboard.py`, and Textual behavior is exercised headlessly in `tests/test_tui.py`.
 
 ## Runtime flow
 
-For mutating commands:
+For mutating commands and TUI actions:
 
-1. The root command selects a configuration path.
-2. `config.py` loads and validates it into `AppConfig`.
-3. `storage.py` acquires an exclusive writer lock.
-4. YAML is loaded into a typed `Board`.
-5. `services.py` applies the operation and returns an `OperationResult`.
-6. The board is serialized and atomically replaced on disk.
-7. The CLI prints messages, optionally repaints, and returns non-zero if any requested operation failed.
+1. The selected configuration is loaded and validated into `AppConfig`.
+2. An exclusive datastore writer lock is acquired in `storage.py`.
+3. YAML is read and converted into a typed `Board`.
+4. `services.py` applies the requested operation and returns a structured result containing messages plus success/failure counts.
+5. Successful mutations serialize the board and atomically replace the datastore.
+6. The CLI prints service messages or the TUI refreshes the live board; failed requested operations remain non-zero in CLI mode.
 
-`show` and `history` are read-only and do not acquire the writer lock. Atomic datastore replacement means readers observe complete files. A missing datastore is displayed as an empty board and is created on the first mutating command.
+`show`, `history`, and normal TUI reads are read-only and do not acquire the writer lock. Atomic datastore replacement means readers observe either the previous complete file or the new complete file. Showing a board whose datastore does not yet exist returns an empty board without creating a file; the first mutating command initializes persistence.
+
+## Interactive TUI
+
+`kanban-tui tui` runs a Textual application with TODO, IN PROGRESS, and DONE columns. Selection, search, editing, state movement, archiving, restoring, and reprioritization are UI actions only; they do not duplicate business rules.
+
+The TUI calls the same service functions used by Click commands, so capacity limits, validation, timestamps, ordering, ID integrity, locking, and persistence semantics remain identical across interfaces. Dynamic `ListView` refreshes await Textual DOM updates before assigning selection/focus, which keeps keyboard operation deterministic and supports headless `App.run_test()` tests.
 
 ## Task states and limits
 
-Supported states:
+`TaskState` defines the only supported states:
 
 - `todo`
 - `inprogress`
 - `done`
 - `deleted`
 
-Normal progression is `todo -> inprogress -> done`. Regression moves in the opposite direction. Deletion moves a task to the deleted collection. `restore` returns a deleted task to TODO while preserving its ID and creation time.
+Normal progression is `todo -> inprogress -> done`. Direct state commands can target TODO, IN PROGRESS, or DONE through shared transition logic. Deletion moves a task from the active collection to the deleted collection. `restore` moves a deleted task back to TODO while preserving its ID and creation timestamp.
 
-Capacity limits are invariants on entry into constrained states: `limits.wip` applies whenever a task enters `inprogress`, and `limits.todo` applies whenever a task enters `todo`.
+Capacity limits are invariants on entry into a constrained state: every transition into `inprogress` enforces `limits.wip`, and every transition into `todo` enforces `limits.todo` when configured.
 
-Task IDs are unique across active and deleted tasks. New IDs are allocated above the highest ID in either collection.
+Task IDs are unique across both active and deleted history. New IDs are allocated above the highest ID present in either collection, so deleted IDs are never reused.
+
+## Manual ordering
+
+TODO and IN PROGRESS tasks persist a numeric `position`. Legacy four-field task records remain valid; their task ID is used as the initial position when no explicit position is stored. New writes add the position as the fifth record field.
+
+Within TODO and IN PROGRESS, rendering uses `(position, id)` ordering. Reordering compacts positions to deterministic consecutive values. New tasks and tasks entering a manually ordered state are placed at the bottom of that state. DONE remains ordered by `modified_at` descending, which represents completion/last-transition time.
 
 ## Configuration and board selection
 
-Configuration precedence:
+Configuration selection is deterministic and has one precedence order:
 
 1. explicit root option `--config PATH`;
 2. `$KANBAN_TUI_HOME/.kanban-tui.yaml` when `KANBAN_TUI_HOME` is set;
 3. `~/.kanban-tui.yaml`.
 
-The root option applies to every subcommand:
+The root option applies to every subcommand, including `configure`, `show`, mutations, `history`, and `tui`. This allows multiple independent boards without mutating environment variables:
 
 ```text
 kanban-tui --config ~/boards/work.yaml show
 kanban-tui --config ~/boards/personal.yaml add Buy groceries
 ```
 
-`kanban-tui --config PATH configure` creates the selected configuration path and uses the same basename with `.dat` as the default datastore.
+`kanban-tui --config PATH configure` creates the selected configuration path and uses the same basename with `.dat` as its default datastore. For example, `/home/user/boards/work.yaml` defaults to `/home/user/boards/work.dat`.
 
 Supported configuration values:
 
 - `data_path`: datastore path.
 - `limits.todo`: optional TODO capacity.
 - `limits.wip`: optional in-progress capacity.
-- `limits.done`: maximum completed tasks displayed; default `10`.
+- `limits.done`: maximum done items displayed; default `10`.
 - `limits.taskname`: maximum task text length; default `40`.
-- `repaint`: whether to display the board after successful mutations; default `false`.
+- `repaint`: whether to display the board after mutations; default `false`.
 
-Path semantics:
+`data_path` path semantics are deterministic:
 
 - absolute paths are used as supplied;
-- `~` expands to the user's home directory;
-- relative `data_path` values resolve against the selected configuration file directory.
+- `~` is expanded using the user's home directory;
+- relative paths are resolved relative to the directory containing the selected configuration file, never relative to the shell's current working directory.
 
-The example configuration is `examples/kanban-tui.yaml`.
+Default `kanban-tui configure` creates a missing `KANBAN_TUI_HOME` directory when necessary and writes a minimal configuration. An example lives at `examples/kanban-tui.yaml`. Missing datastore parent directories are created when a writer first initializes the board.
 
-## Datastore and timestamps
+## Datastore format and timestamps
 
-The datastore is YAML with `data` and `deleted` mappings. Each task record stores state, text, modification time, and creation time.
-
-New writes use timezone-aware ISO 8601 timestamps:
+Task records are compact YAML lists for simple local persistence. The current record shape is:
 
 ```yaml
 data:
@@ -90,21 +100,32 @@ data:
     - Example task
     - '2026-09-04T10:00:00+02:00'
     - '2026-09-04T09:00:00+02:00'
+    - 1
 deleted: {}
 ```
 
-Older timestamp strings are parsed at the model boundary and normalized to timezone-aware `datetime` values. New writes always serialize ISO 8601 timestamps.
+The fields are state, text, modified timestamp, creation timestamp, and manual position. Older four-field records remain readable and acquire an explicit position on their next write.
 
-`created_at` is the original creation time. `modified_at` is the time of the most recent edit or state transition. Completed tasks are ordered by `modified_at` descending.
+New writes use timezone-aware ISO 8601 timestamps. The model boundary also accepts the earlier timestamp form such as `2026-Sep-04 10:00:00`. Naive timestamps are interpreted in the machine's local timezone for that date and normalized to timezone-aware `datetime` values inside the domain model.
+
+`created_at` is the original task creation time. `modified_at` is the time of the most recent edit or state transition. DONE tasks are ordered by `modified_at` descending, so `limits.done` selects the most recently completed tasks.
 
 ## Persistence and locking
 
-Mutating commands use a sibling `<datastore>.lock` directory as an inter-process writer lock. The owner PID is stored when possible.
+Mutating commands use a sibling `<datastore>.lock` directory as an inter-process writer lock. The owner PID is written inside the lock directory when possible.
 
-On POSIX systems, a lock whose recorded PID is no longer running is recovered. When PID detection is unavailable or owner metadata is missing, locks older than five minutes are treated as stale. Live writers block other writers.
+On POSIX systems, an existing lock whose recorded owner PID no longer exists is considered stale and recovered. When live-PID detection is unavailable or owner metadata is missing, a lock older than five minutes is treated as stale. A live writer lock still prevents another writer from entering the read-modify-write transaction.
 
-Writes use a temporary file in the datastore directory, flush and `fsync` it, then replace the datastore with `os.replace()`. This keeps replacement atomic on the same filesystem.
+Normal and exceptional command completion removes the writer lock. Read-only commands do not take this exclusive lock.
 
-## Local project configuration
+Writes use a temporary file in the datastore directory, flush and `fsync` the contents, then replace the datastore with `os.replace()`. This keeps replacement atomic on the same filesystem and preserves the previous valid file if writing the temporary file fails.
 
-`pyproject.toml` defines local installation metadata, runtime dependencies, the `kanban-tui` console entry point, and development tooling. The application version is sourced from `VERSION`.
+## Local installation
+
+Project metadata and local installation configuration live in `pyproject.toml` with a `src/` layout. The installed console entry point is:
+
+```text
+kanban-tui = kanban_tui.cli:main
+```
+
+The project version is sourced from the root `VERSION` file. Runtime source checkouts use that same local version value.
