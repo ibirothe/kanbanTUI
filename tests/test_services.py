@@ -1,65 +1,65 @@
+from pathlib import Path
+
+from kanban_tui.models import AppConfig, Board, Limits, Task, TaskState
 from kanban_tui.services import add_tasks, delete_tasks, promote_tasks, regress_tasks
 
 
 def base_config(**limits):
-    return {
-        "clikan_data": "/tmp/unused",
-        "limits": {"taskname": 40, "done": 10, **limits},
-        "repaint": False,
-    }
-
-
-def empty_board():
-    return {"data": {}, "deleted": {}}
+    return AppConfig(
+        clikan_data=Path("/tmp/unused"),
+        limits=Limits(**limits),
+        repaint=False,
+    )
 
 
 def test_add_and_delete_tasks():
-    data = empty_board()
+    board = Board()
 
-    add_messages = add_tasks(base_config(), data, ["one", "two"])
-    delete_messages = delete_tasks(data, ["1"])
+    add_messages = add_tasks(base_config(), board, ["one", "two"])
+    delete_messages = delete_tasks(board, ["1"])
 
-    assert len(data["data"]) == 1
-    assert 1 in data["deleted"]
+    assert len(board.active) == 1
+    assert 1 in board.deleted
+    assert board.deleted[1].state is TaskState.DELETED
     assert "Creating new task w/ id: 1 -> one" in add_messages
     assert "Removed task 1." in delete_messages
 
 
 def test_batch_promotion_respects_wip_limit():
-    data = empty_board()
+    board = Board()
     config = base_config(wip=1)
-    add_tasks(config, data, ["one", "two"])
+    add_tasks(config, board, ["one", "two"])
 
-    messages = promote_tasks(config, data, ["1", "2"])
+    messages = promote_tasks(config, board, ["1", "2"])
 
-    assert data["data"][1][0] == "inprogress"
-    assert data["data"][2][0] == "todo"
+    assert board.active[1].state is TaskState.IN_PROGRESS
+    assert board.active[2].state is TaskState.TODO
     assert "Can not promote, in-progress limit of 1 reached." in messages
 
 
 def test_regress_done_respects_wip_limit():
-    data = {
-        "data": {
-            1: ["inprogress", "one", "now", "before"],
-            2: ["done", "two", "now", "before"],
-        },
-        "deleted": {},
-    }
+    board = Board(
+        active={
+            1: Task(1, TaskState.IN_PROGRESS, "one", "now", "before"),
+            2: Task(2, TaskState.DONE, "two", "now", "before"),
+        }
+    )
     config = base_config(wip=1)
 
-    messages = regress_tasks(config, data, ["2"])
+    messages = regress_tasks(config, board, ["2"])
 
-    assert data["data"][2][0] == "done"
+    assert board.active[2].state is TaskState.DONE
     assert "Can not regress, in-progress limit of 1 reached." in messages
 
 
 def test_regress_inprogress_returns_to_todo():
-    data = {
-        "data": {1: ["inprogress", "one", "now", "before"]},
-        "deleted": {},
-    }
+    board = Board(
+        active={
+            1: Task(1, TaskState.IN_PROGRESS, "one", "now", "before")
+        }
+    )
 
-    messages = regress_tasks(base_config(), data, ["1"])
+    messages = regress_tasks(base_config(), board, ["1"])
 
-    assert data["data"][1][0] == "todo"
+    assert board.active[1].state is TaskState.TODO
     assert "Regressing task 1 to todo." in messages
