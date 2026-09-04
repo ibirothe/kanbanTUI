@@ -1,26 +1,29 @@
 from rich.console import Console
 from rich.table import Table
 
+from .models import AppConfig, Board, TaskState
 
-def split_items(data):
+
+def split_items(board: Board):
     todos = []
     inprogs = []
     dones = []
 
-    for key, value in data["data"].items():
-        if value[0] == "todo":
-            todos.append("[%d] %s" % (key, value[1]))
-        elif value[0] == "inprogress":
-            inprogs.append("[%d] %s" % (key, value[1]))
+    for task_id, task in board.active.items():
+        label = f"[{task_id}] {task.text}"
+        if task.state is TaskState.TODO:
+            todos.append(label)
+        elif task.state is TaskState.IN_PROGRESS:
+            inprogs.append(label)
         else:
-            dones.insert(0, "[%d] %s" % (key, value[1]))
+            dones.insert(0, label)
 
     return todos, inprogs, dones
 
 
-def render_board(config, data, version: str) -> None:
-    todos, inprogs, dones = split_items(data)
-    dones = dones[: config["limits"]["done"]]
+def render_board(config: AppConfig, board: Board, version: str) -> None:
+    todos, inprogs, dones = split_items(board)
+    dones = dones[: config.limits.done]
 
     table = Table(show_header=True, show_footer=True)
     table.add_column(
