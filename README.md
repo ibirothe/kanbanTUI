@@ -1,8 +1,6 @@
-# kanbanTUI / clikan
+# kanbanTUI
 
-A small terminal-based personal Kanban board. The installed command remains `clikan` for compatibility.
-
-![icon](docs/icon-256x256.png)
+A terminal-based personal Kanban board for managing TODO, in-progress, completed, and deleted tasks.
 
 ## Requirements
 
@@ -22,77 +20,75 @@ For local development:
 python -m pip install -e ".[dev]"
 ```
 
-Do not use `pip install clikan` to install this fork: that PyPI distribution belongs to the upstream project. PyPI publication for this maintained fork is deferred until a unique distribution name is selected in KT-034.
-
 ## Configuration
 
-Create the default configuration with:
+Create the default configuration:
 
 ```bash
-clikan configure
+kanban-tui configure
 ```
 
-Or create `~/.clikan.yaml` manually. See [`examples/clikan.yaml`](examples/clikan.yaml).
+The default configuration is `~/.kanban-tui.yaml`. An example is available at [`examples/kanban-tui.yaml`](examples/kanban-tui.yaml).
 
 Supported settings:
 
-- `clikan_data`: datastore path. Relative paths are resolved relative to the configuration file directory.
+- `data_path`: datastore path. Relative paths are resolved relative to the configuration file directory.
 - `limits.todo`: optional TODO capacity.
 - `limits.wip`: optional in-progress capacity.
-- `limits.done`: maximum done items displayed; default `10`.
+- `limits.done`: maximum completed tasks displayed; default `10`.
 - `limits.taskname`: maximum task text length; default `40`.
 - `repaint`: display the board after successful mutations; default `false`.
 
-Configuration selection uses this precedence:
+Configuration selection precedence:
 
 1. explicit root option `--config PATH`;
-2. `$CLIKAN_HOME/.clikan.yaml` when `CLIKAN_HOME` is set;
-3. `~/.clikan.yaml`.
+2. `$KANBAN_TUI_HOME/.kanban-tui.yaml` when `KANBAN_TUI_HOME` is set;
+3. `~/.kanban-tui.yaml`.
 
-Use `--config` to manage independent boards from one installation:
+Use `--config` for independent boards:
 
 ```bash
-clikan --config ~/boards/work.yaml configure
-clikan --config ~/boards/work.yaml add Fix production bug
-clikan --config ~/boards/personal.yaml configure
-clikan --config ~/boards/personal.yaml add Buy groceries
-clikan --config ~/boards/work.yaml show
+kanban-tui --config ~/boards/work.yaml configure
+kanban-tui --config ~/boards/work.yaml add Fix production bug
+kanban-tui --config ~/boards/personal.yaml configure
+kanban-tui --config ~/boards/personal.yaml add Buy groceries
+kanban-tui --config ~/boards/work.yaml show
 ```
 
-`configure` honors the selected explicit path. For example, `~/boards/work.yaml` gets a default datastore at `~/boards/work.dat`. Relative `clikan_data` values inside a configuration file are always resolved relative to that configuration file, not the shell's current directory.
+`configure` honors the selected path and creates a datastore with the same basename and a `.dat` suffix. Relative `data_path` values are always resolved against the selected configuration file.
 
 ## Usage
 
 ```bash
-clikan show
-clikan add Fix login bug
-clikan edit 1 Fix login timeout handling
-clikan promote 1
-clikan regress 1
-clikan delete 1
-clikan history
-clikan restore 1
+kanban-tui show
+kanban-tui add Fix login bug
+kanban-tui edit 1 Fix login timeout handling
+kanban-tui promote 1
+kanban-tui regress 1
+kanban-tui delete 1
+kanban-tui history
+kanban-tui restore 1
 ```
 
-`add` treats all words after the command as one task description, so quoting normal task text is optional. `edit` uses the same text normalization and length rules while preserving the task ID, state, and creation timestamp. Deleted tasks cannot be edited directly.
+`add` treats all words after the command as one task description. `edit` preserves task ID, state, and creation time. `history` lists deleted tasks, and `restore` returns deleted tasks to TODO while respecting configured capacity limits.
 
-`history` shows the deleted-task archive. `restore` moves deleted tasks back to TODO with their original IDs and creation timestamps; restoration respects the configured TODO capacity.
+Commands that require operands use standard Click usage errors when operands are missing. Rejected operations return a non-zero exit status. For multi-ID commands, the command returns non-zero if any requested operation fails.
 
-### Output formats
+Unique command prefixes are accepted when unambiguous.
 
-`show` supports three output formats:
+## Output formats
 
 ```bash
-clikan show --format table
-clikan show --format plain
-clikan show --format json
+kanban-tui show --format table
+kanban-tui show --format plain
+kanban-tui show --format json
 ```
 
-`table` is the default Rich terminal view. `plain` emits deterministic tab-separated text without color codes. `json` emits a structured `tasks` array containing task ID, state, text, and timezone-aware ISO 8601 creation/modification timestamps. All formats use the same deterministic ordering and configured DONE display limit. Rich table output honors `NO_COLOR`.
+- `table` is the default Rich terminal view.
+- `plain` emits deterministic tab-separated text without color codes.
+- `json` emits structured task data with timezone-aware ISO 8601 timestamps.
 
-Commands that require task IDs or task text report a standard Click usage error when their operand is missing. Rejected task operations such as invalid IDs, unknown IDs, capacity-limit failures, or invalid task text return a non-zero exit code. For commands that accept multiple IDs, the command returns non-zero if any requested operation fails, even when other items succeed.
-
-Unique command prefixes are accepted. `s`, `a`, `p`, and `d` remain the short forms for `show`, `add`, `promote`, and `delete` respectively.
+All formats use the same deterministic ordering and completed-task display limit. Rich output honors `NO_COLOR`.
 
 ## Project structure
 
@@ -111,25 +107,17 @@ tests/
   test_*.py
 ```
 
-See [`docs/architecture.md`](docs/architecture.md) for module responsibilities, domain models, task transitions, persistence format, configuration precedence, and locking behavior.
-
-## Release baseline
-
-The maintained release baseline is **0.5.0**. See [`CHANGELOG.md`](CHANGELOG.md) for the complete change summary.
-
-0.5.0 is prepared for GitHub/source-checkout use. Package-index publication is intentionally deferred until the distribution-name decision in KT-034 is resolved.
+See [`docs/architecture.md`](docs/architecture.md) for module responsibilities and persistence behavior. See [`CHANGELOG.md`](CHANGELOG.md) for version history.
 
 ## Development
 
-This is a solo-maintained project. Changes may be committed directly to the active development branch.
-
-Run the test suite:
+Run tests:
 
 ```bash
 pytest
 ```
 
-Run tests with coverage:
+Run coverage:
 
 ```bash
 pytest --cov=kanban_tui --cov-report=term-missing
@@ -154,14 +142,6 @@ Run static type checking:
 mypy src/kanban_tui
 ```
 
-Build wheel and source distributions:
-
-```bash
-python -m build
-```
-
-Project metadata, dependencies, tooling, Python compatibility, and build configuration live in `pyproject.toml`.
-
 ## Maintainer
 
 Pascal Rothe  
@@ -170,7 +150,7 @@ Email: `ibirothe@gmail.com`
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE). The license file retains the original copyright notice required by the original MIT grant.
+MIT. See [`LICENSE`](LICENSE).
 
 ## Support
 
