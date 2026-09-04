@@ -30,8 +30,7 @@ def validate_board_name(name: str) -> str:
     normalized = name.strip().lower()
     if not BOARD_NAME_PATTERN.fullmatch(normalized):
         raise click.ClickException(
-            "Board names must start with a letter or number and contain only "
-            "lowercase letters, numbers, '-' or '_'."
+            "Board names are lowercase slugs containing letters, numbers, '-' or '_'."
         )
     return normalized
 
@@ -199,7 +198,10 @@ def set_config_value(
         if limit_name not in LIMIT_NAMES:
             raise click.ClickException(f"Unknown configuration key: {key}")
 
-        limits = config.setdefault("limits", {})
+        limits = config.get("limits")
+        if limits is None:
+            limits = {}
+            config["limits"] = limits
         if not isinstance(limits, dict):
             raise click.ClickException("limits must be a mapping.")
 
