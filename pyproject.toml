@@ -37,18 +37,19 @@ dev = [
 ]
 
 [project.scripts]
-clikan = "clikan:clikan"
+clikan = "kanban_tui.cli:clikan"
 
 [project.urls]
 Repository = "https://github.com/ibirothe/kanbanTUI"
 Issues = "https://github.com/ibirothe/kanbanTUI/issues"
 
-[tool.setuptools]
-py-modules = ["clikan"]
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.setuptools.dynamic]
 version = { file = "VERSION" }
 
 [tool.pytest.ini_options]
-testpaths = ["."]
-python_files = ["*_test.py"]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+pythonpath = ["src"]
