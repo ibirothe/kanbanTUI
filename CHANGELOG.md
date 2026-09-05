@@ -25,6 +25,9 @@ Current maintained kanbanTUI baseline.
 - added persistent per-board color themes shared by Rich and Textual;
 - added built-in `arch`, `nord`, `gruvbox`, `dracula`, and `mono` palettes with `arch` as the backward-compatible default;
 - added `theme list`, `theme current`, and `theme set NAME`, plus `config set theme NAME`;
+- added custom user themes from XDG/portable YAML files with built-in inheritance and semantic color-role overrides;
+- made theme choices dynamically discoverable so newly created custom YAML files are immediately available to Click validation and shell completion;
+- reject malformed custom theme YAML, invalid `#RRGGBB` colors, unknown roles/keys, invalid names, non-built-in parents, and built-in-name collisions with actionable CLI errors;
 - themed TODO/WIP/DONE states, priority badges, tags, TUI chrome, dialogs and selection surfaces while keeping plain/JSON output color-free and honoring `NO_COLOR`.
 
 ### Data safety and portability
@@ -67,8 +70,9 @@ Current maintained kanbanTUI baseline.
 - adopted XDG config/data defaults: `~/.config/kanban-tui/` and `~/.local/share/kanban-tui/`, honoring `XDG_CONFIG_HOME` and `XDG_DATA_HOME`;
 - retained safe discovery of existing `~/.kanban-tui.yaml` and legacy `~/boards/` configurations when no XDG config exists;
 - retained `KANBAN_TUI_HOME` as an explicit portable/test root override;
+- store custom theme YAML files below the same XDG/portable config root under `themes/`;
 - added Bash, Zsh and Fish completion documentation using Click's native completion protocol;
-- added dynamic completion for existing `--board` names;
+- added dynamic completion for existing `--board` names and discovered theme names;
 - removed the `click-default-group` runtime dependency and implemented no-argument board display directly with `click.Group`;
 - added Python 3.14 project metadata for the current Arch Python generation;
 - added regression coverage for XDG paths, legacy discovery, native shell completion and no-argument root behavior.
