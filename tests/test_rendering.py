@@ -106,7 +106,10 @@ def test_column_labels_show_capacity_full_and_filtered_counts():
     cfg = config(todo=2, wip=3, done_limit=1)
 
     assert column_label(cfg, board, TaskState.TODO) == "TODO 2/2 FULL"
-    assert column_label(cfg, board, TaskState.TODO, visible_count=1) == "TODO 2/2 FULL · 1 shown"
+    assert (
+        column_label(cfg, board, TaskState.TODO, visible_count=1)
+        == "TODO 2/2 FULL · 1 shown"
+    )
     assert column_label(cfg, board, TaskState.IN_PROGRESS) == "IN PROGRESS 1/3"
     assert column_label(cfg, board, TaskState.DONE, visible_count=1) == "DONE 1/2"
 

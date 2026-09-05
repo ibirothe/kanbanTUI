@@ -13,12 +13,21 @@ from kanban_tui.models import (
     TaskPriority,
     TaskState,
 )
-from kanban_tui.rendering import format_json, format_plain, task_display_text, visible_tasks
-from kanban_tui.services import add_tasks, set_task_priority, set_task_tags, update_task_tag
+from kanban_tui.rendering import (
+    format_json,
+    format_plain,
+    task_display_text,
+    visible_tasks,
+)
+from kanban_tui.services import (
+    add_tasks,
+    set_task_priority,
+    set_task_tags,
+    update_task_tag,
+)
 from kanban_tui.storage import datastore_lock, read_data, write_data
 from kanban_tui.transfer import board_from_export, export_payload
 from kanban_tui.tui import KanbanApp
-
 
 STAMP = datetime(2026, 9, 4, 10, 0, tzinfo=timezone.utc)
 EARLIER = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)

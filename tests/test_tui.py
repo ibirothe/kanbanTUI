@@ -77,7 +77,11 @@ async def test_tui_keyboard_reprioritizes_selected_task(write_config):
         await pilot.press("shift+up")
         await pilot.pause()
 
-        assert [task.id for task in app.board.ordered_tasks(TaskState.TODO)] == [2, 1, 3]
+        assert [task.id for task in app.board.ordered_tasks(TaskState.TODO)] == [
+            2,
+            1,
+            3,
+        ]
         assert app._selected_task().id == 2
 
     persisted = read_data(config, initialize_missing=False)

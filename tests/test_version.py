@@ -2,7 +2,6 @@ from pathlib import Path
 
 from kanban_tui import VERSION
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 

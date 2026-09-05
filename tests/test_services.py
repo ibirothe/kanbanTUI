@@ -13,7 +13,6 @@ from kanban_tui.services import (
     restore_tasks,
 )
 
-
 NOW = datetime(2026, 9, 4, 10, 0, tzinfo=timezone.utc)
 BEFORE = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
 

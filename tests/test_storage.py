@@ -7,7 +7,6 @@ import yaml
 from kanban_tui.models import Board, Task, TaskState
 from kanban_tui.storage import datastore_lock, read_data, write_data
 
-
 NOW = datetime(2026, 9, 4, 10, 0, tzinfo=timezone.utc)
 BEFORE = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
 
@@ -61,7 +60,9 @@ def test_concurrent_writer_lock_is_rejected(write_config):
     config = write_config()
 
     with datastore_lock(config):
-        with pytest.raises(click.ClickException, match="locked by another kanban-tui process"):
+        with pytest.raises(
+            click.ClickException, match="locked by another kanban-tui process"
+        ):
             with datastore_lock(config):
                 pass
 

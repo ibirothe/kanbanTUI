@@ -18,7 +18,6 @@ from kanban_tui.themes import (
 )
 from kanban_tui.tui import KanbanApp
 
-
 STAMP = datetime(2026, 9, 5, 12, 0, tzinfo=timezone.utc)
 
 
@@ -163,7 +162,9 @@ def test_theme_cli_lists_sets_and_reports_selected_theme(runner, write_config):
     assert "theme: nord" in config_show.output
 
 
-def test_theme_cli_discovers_custom_theme_created_after_cli_import(runner, write_config):
+def test_theme_cli_discovers_custom_theme_created_after_cli_import(
+    runner, write_config
+):
     write_config()
     write_user_theme(
         "ocean",
@@ -181,7 +182,10 @@ def test_theme_cli_discovers_custom_theme_created_after_cli_import(runner, write
     assert "ocean\tOcean development theme" in listing.output
     assert changed.exit_code == 0
     assert "Theme set to ocean" in changed.output
-    assert yaml.safe_load(get_config_path().read_text(encoding="utf-8"))["theme"] == "ocean"
+    assert (
+        yaml.safe_load(get_config_path().read_text(encoding="utf-8"))["theme"]
+        == "ocean"
+    )
 
 
 def test_invalid_custom_theme_cli_error_is_actionable(runner, write_config):
