@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Documentation and maintenance
+
+- split configuration, themes and shell completion into linked user references;
+- add a quick start, documentation index, contribution guide and maintenance checklist;
+- add a shared local quality-check command;
+- fix Fish completion setup when `XDG_CONFIG_HOME` is unset or empty;
+- ignore regular datastore lock files as well as legacy lock directories.
+
 ## 0.5.0
 
 Current maintained kanbanTUI baseline.

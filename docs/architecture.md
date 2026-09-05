@@ -194,12 +194,8 @@ No system-site `pip install` is part of the end-user flow. Local development use
 
 ## Local quality checks
 
-```text
-pytest
-pytest --cov=kanban_tui --cov-report=term-missing
-ruff check .
-ruff format --check .
-mypy src/kanban_tui
-```
+Run `python scripts/check.py` from the repository root after installing `.[dev]`.
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for individual commands and test guidance,
+and [maintenance.md](maintenance.md) for release checks.
 
 No remote workflow is required by the project model.
