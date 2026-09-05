@@ -21,7 +21,11 @@ Current maintained kanbanTUI baseline.
 - added improved capacity-aware table rendering, search/state/metadata filters, and deterministic view sorting;
 - added named boards with `--board`, `board create`, and `board list`;
 - added `config path`, `config show`, and validated `config set` commands;
-- standardized concise task-centric command feedback.
+- standardized concise task-centric command feedback;
+- added persistent per-board color themes shared by Rich and Textual;
+- added built-in `arch`, `nord`, `gruvbox`, `dracula`, and `mono` palettes with `arch` as the backward-compatible default;
+- added `theme list`, `theme current`, and `theme set NAME`, plus `config set theme NAME`;
+- themed TODO/WIP/DONE states, priority badges, tags, TUI chrome, dialogs and selection surfaces while keeping plain/JSON output color-free and honoring `NO_COLOR`.
 
 ### Data safety and portability
 
