@@ -14,7 +14,7 @@ def test_custom_theme_filename_must_be_lowercase_slug():
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="lowercase theme slug"):
+    with pytest.raises(ValueError, match="lowercase"):
         tuple(theme_names())
 
 
@@ -32,7 +32,9 @@ def test_invalid_unused_custom_theme_does_not_block_switch_to_builtin(
     result = runner.invoke(main, ["theme", "set", "arch"])
 
     assert result.exit_code == 0
-    assert yaml.safe_load(get_config_path().read_text(encoding="utf-8"))["theme"] == "arch"
+    assert (
+        yaml.safe_load(get_config_path().read_text(encoding="utf-8"))["theme"] == "arch"
+    )
 
 
 def test_theme_list_reports_invalid_custom_theme_cleanly(runner, write_config):

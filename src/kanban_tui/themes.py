@@ -7,7 +7,6 @@ from pathlib import Path
 import click
 import yaml
 
-
 DEFAULT_THEME = "arch"
 APP_DIR_NAME = "kanban-tui"
 THEME_NAME_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
@@ -197,9 +196,7 @@ def _custom_theme_paths() -> list[Path]:
 
 def _validate_color(role: str, value: object, path: Path) -> str:
     if not isinstance(value, str) or not HEX_COLOR_PATTERN.fullmatch(value.strip()):
-        raise ThemeError(
-            f"custom theme {path}: colors.{role} must be a #RRGGBB color"
-        )
+        raise ThemeError(f"custom theme {path}: colors.{role} must be a #RRGGBB color")
     return value.strip().lower()
 
 
@@ -212,6 +209,8 @@ def _load_custom_theme(path: Path) -> Theme:
 
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except UnicodeError as exc:
+        raise ThemeError(f"custom theme {path} must use valid UTF-8 encoding.") from exc
     except OSError as exc:
         raise ThemeError(f"could not read custom theme {path}: {exc}") from exc
     except yaml.YAMLError as exc:
@@ -239,9 +238,7 @@ def _load_custom_theme(path: Path) -> Theme:
 
     description = raw.get("description", f"Custom theme based on {base_name}")
     if not isinstance(description, str) or not description.strip():
-        raise ThemeError(
-            f"custom theme {path}: description must be a non-empty string"
-        )
+        raise ThemeError(f"custom theme {path}: description must be a non-empty string")
 
     raw_colors = raw.get("colors", {})
     if not isinstance(raw_colors, dict):

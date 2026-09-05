@@ -1,15 +1,14 @@
 import os
 import re
-import tempfile
 from pathlib import Path
 from typing import Any
 
 import click
 import yaml
 
+from .atomic import atomic_text_writer
 from .models import AppConfig, Limits
 from .themes import DEFAULT_THEME, get_theme
-
 
 APP_DIR_NAME = "kanban-tui"
 LEGACY_CONFIG_NAME = ".kanban-tui.yaml"
@@ -169,7 +168,9 @@ def validate_config(config, config_path: Path) -> AppConfig:
 
     raw_theme = config.get("theme", DEFAULT_THEME)
     if not isinstance(raw_theme, str):
-        raise click.ClickException(f"Config file {config_path}: theme must be a string.")
+        raise click.ClickException(
+            f"Config file {config_path}: theme must be a string."
+        )
     try:
         theme = get_theme(raw_theme).name
     except ValueError as exc:
@@ -192,6 +193,10 @@ def _read_yaml_document(config_path: Path) -> dict[str, Any]:
                 raise click.ClickException(
                     f"Config file {config_path} contains invalid YAML: {exc}"
                 ) from exc
+    except UnicodeError as exc:
+        raise click.ClickException(
+            f"Config file {config_path} must use valid UTF-8 encoding."
+        ) from exc
     except OSError as exc:
         raise click.ClickException(
             f"Could not read config file {config_path}: {exc}"
@@ -217,25 +222,10 @@ def read_config(explicit_path: Path | None = None) -> AppConfig:
 
 
 def _atomic_write_config(config_path: Path, config: dict[str, Any]) -> None:
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path: Path | None = None
     try:
-        with tempfile.NamedTemporaryFile(
-            "w",
-            encoding="utf-8",
-            dir=config_path.parent,
-            prefix=f".{config_path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as outfile:
+        with atomic_text_writer(config_path) as outfile:
             yaml.safe_dump(config, outfile, default_flow_style=False, sort_keys=False)
-            outfile.flush()
-            os.fsync(outfile.fileno())
-            temporary_path = Path(outfile.name)
-        os.replace(temporary_path, config_path)
-    except OSError as exc:
-        if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
+    except (OSError, yaml.YAMLError) as exc:
         raise click.ClickException(
             f"Could not write config file {config_path}: {exc}"
         ) from exc
@@ -282,7 +272,7 @@ def set_config_value(
     explicit_path: Path | None = None,
 ) -> Path:
     config_path = get_config_path(explicit_path)
-    config = read_config_document(config_path)
+    config = _read_yaml_document(config_path)
     normalized_key = key.strip().lower()
 
     if normalized_key == "data_path":

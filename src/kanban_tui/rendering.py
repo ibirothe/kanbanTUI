@@ -1,5 +1,6 @@
 import json
 import os
+from typing import TypedDict
 
 from rich.console import Console
 from rich.markup import escape
@@ -15,7 +16,6 @@ from .models import (
     format_timestamp,
 )
 from .themes import DEFAULT_THEME, Theme, get_theme
-
 
 SORT_CHOICES = ("default", "id", "created", "modified")
 
@@ -162,7 +162,9 @@ def _task_payload(task: Task) -> dict[str, object]:
         "created_at": format_timestamp(task.created_at),
         "modified_at": format_timestamp(task.modified_at),
         "completed_at": (
-            format_timestamp(task.completed_at) if task.completed_at is not None else None
+            format_timestamp(task.completed_at)
+            if task.completed_at is not None
+            else None
         ),
         "priority": task.priority.value if task.priority is not None else None,
         "tags": list(task.tags),
@@ -213,9 +215,7 @@ def format_plain(
     unprioritized_only: bool = False,
     tag_filter: str | None = None,
 ) -> str:
-    lines = [
-        "id\tstate\ttext\tcreated_at\tmodified_at\tcompleted_at\tpriority\ttags"
-    ]
+    lines = ["id\tstate\ttext\tcreated_at\tmodified_at\tcompleted_at\tpriority\ttags"]
     for task in visible_tasks(
         config,
         board,
@@ -313,6 +313,15 @@ def _state_color(theme: Theme, state: TaskState) -> str:
     }[state]
 
 
+class ViewOptions(TypedDict):
+    state_filter: TaskState | None
+    search: str | None
+    sort_by: str
+    priority_filter: TaskPriority | None
+    unprioritized_only: bool
+    tag_filter: str | None
+
+
 def render_board(
     config: AppConfig,
     board: Board,
@@ -326,7 +335,7 @@ def render_board(
     unprioritized_only: bool = False,
     tag_filter: str | None = None,
 ) -> None:
-    kwargs = {
+    kwargs: ViewOptions = {
         "state_filter": state_filter,
         "search": search,
         "sort_by": sort_by,
@@ -443,7 +452,9 @@ def render_board(
         row = []
         for state in [TaskState.TODO, TaskState.IN_PROGRESS, TaskState.DONE]:
             tasks = columns[state]
-            row.append(task_rich_text(tasks[index], theme) if index < len(tasks) else "")
+            row.append(
+                task_rich_text(tasks[index], theme) if index < len(tasks) else ""
+            )
         table.add_row(*row)
     console.print(table)
 

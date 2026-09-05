@@ -7,7 +7,6 @@ from typing import Any
 
 from .themes import DEFAULT_THEME
 
-
 LEGACY_TIMESTAMP_FORMAT = "%Y-%b-%d %H:%M:%S"
 TAG_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
 INTEGER_PATTERN = re.compile(r"[0-9]+")
@@ -304,7 +303,9 @@ class Limits:
                     f"limits.{name} must be a non-negative integer"
                 ) from exc
 
-        return cls(**values)
+        done, taskname = values["done"], values["taskname"]
+        assert done is not None and taskname is not None
+        return cls(todo=values["todo"], wip=values["wip"], done=done, taskname=taskname)
 
 
 @dataclass
@@ -356,11 +357,7 @@ class Board:
         """Return the next position at the bottom of an active state."""
         return (
             max(
-                (
-                    task.position
-                    for task in self.active.values()
-                    if task.state is state
-                ),
+                (task.position for task in self.active.values() if task.state is state),
                 default=0,
             )
             + 1
