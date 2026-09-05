@@ -8,6 +8,7 @@ import click
 import yaml
 
 from .models import AppConfig, Limits
+from .themes import DEFAULT_THEME, get_theme
 
 
 APP_DIR_NAME = "kanban-tui"
@@ -166,10 +167,19 @@ def validate_config(config, config_path: Path) -> AppConfig:
             f"Config file {config_path}: repaint must be true or false."
         )
 
+    raw_theme = config.get("theme", DEFAULT_THEME)
+    if not isinstance(raw_theme, str):
+        raise click.ClickException(f"Config file {config_path}: theme must be a string.")
+    try:
+        theme = get_theme(raw_theme).name
+    except ValueError as exc:
+        raise click.ClickException(f"Config file {config_path}: {exc}") from exc
+
     return AppConfig(
         data_path=data_path,
         limits=limits,
         repaint=repaint,
+        theme=theme,
     )
 
 
@@ -246,7 +256,10 @@ def create_default_config(explicit_path: Path | None = None) -> Path:
         data_path = config_path.with_suffix(".dat")
     else:
         data_path = get_default_data_path()
-    _atomic_write_config(config_path, {"data_path": str(data_path)})
+    _atomic_write_config(
+        config_path,
+        {"data_path": str(data_path), "theme": DEFAULT_THEME},
+    )
     return config_path
 
 
@@ -256,7 +269,10 @@ def create_named_board(name: str) -> Path:
     if config_path.exists():
         raise click.ClickException(f"Board '{normalized}' already exists.")
     data_path = get_board_data_path(normalized)
-    _atomic_write_config(config_path, {"data_path": str(data_path)})
+    _atomic_write_config(
+        config_path,
+        {"data_path": str(data_path), "theme": DEFAULT_THEME},
+    )
     return config_path
 
 
@@ -278,6 +294,11 @@ def set_config_value(
         if normalized_value not in {"true", "false"}:
             raise click.ClickException("repaint must be true or false.")
         config["repaint"] = normalized_value == "true"
+    elif normalized_key == "theme":
+        try:
+            config["theme"] = get_theme(value).name
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
     elif normalized_key.startswith("limits."):
         limit_name = normalized_key.split(".", 1)[1]
         if limit_name not in LIMIT_NAMES:
