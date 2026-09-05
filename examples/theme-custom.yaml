@@ -1,0 +1,15 @@
+description: Custom Arch-derived palette
+extends: arch
+colors:
+  background: "#101820"
+  surface: "#1b2733"
+  text: "#e6edf3"
+  muted: "#8b98a5"
+  accent: "#4db8ff"
+  todo: "#4db8ff"
+  wip: "#ffd166"
+  done: "#7bd88f"
+  priority_low: "#7aa2b8"
+  priority_normal: "#4db8ff"
+  priority_high: "#ffb347"
+  priority_urgent: "#ff6b6b"
