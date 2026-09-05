@@ -1,5 +1,6 @@
 import os
 import re
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -249,13 +250,41 @@ def _load_custom_theme(path: Path) -> Theme:
     )
 
 
-def theme_names() -> tuple[str, ...]:
-    """Return all valid built-in and discovered custom theme names."""
+def _theme_name_snapshot() -> tuple[str, ...]:
     custom_names: list[str] = []
     for path in _custom_theme_paths():
         theme = _load_custom_theme(path)
         custom_names.append(theme.name)
     return (*THEMES, *custom_names)
+
+
+class ThemeNameSequence(Sequence[str]):
+    """Dynamic choice sequence so Click sees user themes created after import."""
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(_theme_name_snapshot())
+
+    def __len__(self) -> int:
+        return len(_theme_name_snapshot())
+
+    def __getitem__(self, index):
+        return _theme_name_snapshot()[index]
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, Sequence):
+            return tuple(self) == tuple(other)
+        return False
+
+    def __repr__(self) -> str:
+        return repr(_theme_name_snapshot())
+
+
+_THEME_NAMES = ThemeNameSequence()
+
+
+def theme_names() -> Sequence[str]:
+    """Return a dynamic sequence of built-in and discovered custom theme names."""
+    return _THEME_NAMES
 
 
 def get_theme(name: str) -> Theme:
