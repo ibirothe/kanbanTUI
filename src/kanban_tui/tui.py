@@ -1,7 +1,6 @@
 from collections.abc import Callable
 
 import click
-from rich.markup import escape
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -9,7 +8,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Input, Label, ListItem, ListView, Static
 
 from .models import AppConfig, Board, Task, TaskPriority, TaskState
-from .rendering import column_label, task_display_text, visible_tasks
+from .rendering import column_label, task_rich_text, visible_tasks
 from .services import (
     OperationResult,
     add_tasks,
@@ -22,6 +21,22 @@ from .services import (
     set_task_tags,
 )
 from .storage import datastore_lock, read_data, undo_last_change, write_data
+from .themes import DEFAULT_THEME, Theme, get_theme
+
+
+def _app_theme(screen: ModalScreen) -> Theme:
+    config = getattr(screen.app, "config", None)
+    return get_theme(getattr(config, "theme", DEFAULT_THEME))
+
+
+def _style_dialog(screen: ModalScreen, dialog_id: str) -> None:
+    theme = _app_theme(screen)
+    screen.styles.background = theme.background
+    screen.styles.color = theme.text
+    dialog = screen.query_one(dialog_id, Vertical)
+    dialog.styles.background = theme.surface
+    dialog.styles.color = theme.text
+    dialog.styles.border = ("round", theme.accent)
 
 
 class PromptScreen(ModalScreen[str | None]):
@@ -38,8 +53,6 @@ class PromptScreen(ModalScreen[str | None]):
         width: 70%;
         max-width: 80;
         height: auto;
-        border: round $accent;
-        background: $surface;
         padding: 1 2;
     }
 
@@ -50,7 +63,6 @@ class PromptScreen(ModalScreen[str | None]):
 
     #prompt-hint {
         margin-top: 1;
-        color: $text-muted;
     }
     """
 
@@ -78,7 +90,14 @@ class PromptScreen(ModalScreen[str | None]):
             yield Static("Enter to confirm · Esc to cancel", id="prompt-hint")
 
     def on_mount(self) -> None:
-        self.query_one("#prompt-input", Input).focus()
+        _style_dialog(self, "#prompt-dialog")
+        theme = _app_theme(self)
+        input_widget = self.query_one("#prompt-input", Input)
+        input_widget.styles.border = ("round", theme.accent)
+        input_widget.styles.background = theme.background
+        input_widget.styles.color = theme.text
+        self.query_one("#prompt-hint", Static).styles.color = theme.muted
+        input_widget.focus()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self.dismiss(event.value)
@@ -105,8 +124,6 @@ class HelpScreen(ModalScreen[None]):
         width: 72;
         max-width: 90%;
         height: auto;
-        border: round $accent;
-        background: $surface;
         padding: 1 2;
     }
     """
@@ -131,6 +148,9 @@ class HelpScreen(ModalScreen[None]):
                 "q            quit"
             )
 
+    def on_mount(self) -> None:
+        _style_dialog(self, "#help-dialog")
+
     def action_close(self) -> None:
         self.dismiss(None)
 
@@ -138,8 +158,8 @@ class HelpScreen(ModalScreen[None]):
 class TaskListItem(ListItem):
     """List item carrying the task ID represented by the row."""
 
-    def __init__(self, task: Task) -> None:
-        super().__init__(Label(escape(task_display_text(task))))
+    def __init__(self, task: Task, theme: Theme) -> None:
+        super().__init__(Label(task_rich_text(task, theme)))
         self.task_id = task.id
 
 
@@ -192,14 +212,12 @@ class KanbanApp(App[None]):
         width: 1fr;
         height: 1fr;
         margin: 0 1;
-        border: round $primary;
     }
 
     .column-title {
         height: 3;
         padding: 1;
         text-style: bold;
-        background: $boost;
     }
 
     ListView {
@@ -213,7 +231,6 @@ class KanbanApp(App[None]):
     #status {
         height: 1;
         padding: 0 2;
-        color: $text-muted;
     }
     """
 
@@ -231,6 +248,7 @@ class KanbanApp(App[None]):
     def __init__(self, config: AppConfig) -> None:
         super().__init__()
         self.config = config
+        self.palette = get_theme(config.theme)
         self.board = Board()
         self.filter_text = ""
         self._last_list_id = "todo-list"
@@ -253,12 +271,58 @@ class KanbanApp(App[None]):
         yield Footer()
 
     async def on_mount(self) -> None:
+        self._apply_theme()
         self._reload_board()
         await self._refresh_board()
+
+    def _state_color(self, state: TaskState) -> str:
+        return {
+            TaskState.TODO: self.palette.todo,
+            TaskState.IN_PROGRESS: self.palette.wip,
+            TaskState.DONE: self.palette.done,
+        }[state]
+
+    def _apply_theme(self) -> None:
+        self.screen.styles.background = self.palette.background
+        self.screen.styles.color = self.palette.text
+
+        header = self.query_one(Header)
+        header.styles.background = self.palette.surface
+        header.styles.color = self.palette.text
+        footer = self.query_one(Footer)
+        footer.styles.background = self.palette.surface
+        footer.styles.color = self.palette.text
+        status = self.query_one("#status", Static)
+        status.styles.background = self.palette.surface
+        status.styles.color = self.palette.muted
+
+        for state, view_id in self.STATE_VIEWS.items():
+            color = self._state_color(state)
+            title = self.query_one(f"#{self.STATE_TITLES[state]}", Static)
+            title.styles.background = self.palette.surface
+            title.styles.color = color
+            if title.parent is not None:
+                title.parent.styles.background = self.palette.background
+                title.parent.styles.border = ("round", color)
+            view = self.query_one(f"#{view_id}", ListView)
+            view.styles.background = self.palette.background
+            view.styles.color = self.palette.text
+
+    def _style_selection(self) -> None:
+        for view_id in self.STATE_VIEWS.values():
+            view = self.query_one(f"#{view_id}", ListView)
+            for child in view.children:
+                child.styles.background = self.palette.background
+                child.styles.color = self.palette.text
+            highlighted = view.highlighted_child
+            if highlighted is not None:
+                highlighted.styles.background = self.palette.surface
+                highlighted.styles.color = self.palette.text
 
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
         if event.list_view.id:
             self._last_list_id = event.list_view.id
+        self._style_selection()
 
     def _set_status(self, message: str) -> None:
         self.query_one("#status", Static).update(message)
@@ -293,7 +357,7 @@ class KanbanApp(App[None]):
             view = self.query_one(f"#{view_id}", ListView)
             await view.clear()
             if tasks:
-                await view.extend(TaskListItem(task) for task in tasks)
+                await view.extend(TaskListItem(task, self.palette) for task in tasks)
                 view.index = 0
                 if first_available is None:
                     first_available = (view_id, view)
@@ -328,6 +392,7 @@ class KanbanApp(App[None]):
                 view.focus()
                 self._last_list_id = view_id
 
+        self._style_selection()
         self.sub_title = (
             f"filter: {self.filter_text}" if self.filter_text else "interactive board"
         )
