@@ -1,34 +1,90 @@
 # kanbanTUI
 
-A terminal-based personal Kanban board for managing TODO, in-progress, completed, and archived tasks.
+A terminal-first personal Kanban board for developers. Arch Linux is the primary target environment; the application remains a normal Python CLI/TUI and does not require a daemon, database server, browser, or cloud account.
+
+## Arch Linux installation
+
+kanbanTUI is intended to be installed as an isolated command-line application with `pipx`, not into Arch's system Python environment.
+
+Install the Arch packages:
+
+```bash
+sudo pacman -S --needed python-pipx git
+```
+
+Ensure the pipx application directory is on your `PATH`:
+
+```bash
+pipx ensurepath
+```
+
+Open a new shell after the first `ensurepath`, then install kanbanTUI directly from this Git repository:
+
+```bash
+pipx install "git+https://github.com/ibirothe/kanbanTUI.git"
+```
+
+Verify the executable and create the initial configuration:
+
+```bash
+kanban-tui --version
+kanban-tui configure
+kanban-tui tui
+```
+
+pipx keeps kanbanTUI and its Python dependencies in an isolated virtual environment and exposes only the `kanban-tui` executable on your user `PATH`.
+
+### Updating
+
+The distribution name is normalized by Python tooling to `kanbantui`:
+
+```bash
+pipx upgrade kanbantui
+```
+
+Check the managed environment with:
+
+```bash
+pipx list
+```
+
+### Uninstalling
+
+```bash
+pipx uninstall kanbantui
+```
 
 ## Requirements
 
-Python 3.11 or newer.
+- Arch Linux is the primary supported desktop/developer environment.
+- Python 3.11 or newer. Current Arch Python 3.14 is within the supported version range.
+- A terminal suitable for Textual/Rich applications.
 
-## Installation
+## XDG configuration and data
 
-Install from a checkout:
+Fresh Linux installations use the XDG base directories:
 
-```bash
-python -m pip install .
+```text
+${XDG_CONFIG_HOME:-~/.config}/kanban-tui/config.yaml
+${XDG_DATA_HOME:-~/.local/share}/kanban-tui/board.dat
 ```
 
-For local development:
-
-```bash
-python -m pip install -e ".[dev]"
-```
-
-## Configuration
-
-Create the default configuration:
+Create the default configuration with:
 
 ```bash
 kanban-tui configure
 ```
 
-The default configuration is `~/.kanban-tui.yaml`. An example is available at [`examples/kanban-tui.yaml`](examples/kanban-tui.yaml).
+Named boards use separate config and data directories:
+
+```text
+${XDG_CONFIG_HOME:-~/.config}/kanban-tui/boards/work.yaml
+${XDG_DATA_HOME:-~/.local/share}/kanban-tui/boards/work.dat
+```
+
+Existing installations are not abandoned: when no XDG config exists, an existing `~/.kanban-tui.yaml` is still discovered. Existing named-board configs under `~/boards/` are also recognized. Fresh configs and named boards use the XDG layout.
+
+`KANBAN_TUI_HOME` remains available as an explicit portable/test override. When set, kanbanTUI keeps config, data, and named boards below that directory instead of using XDG paths.
 
 Supported settings:
 
@@ -39,13 +95,54 @@ Supported settings:
 - `limits.taskname`: maximum task text length; default `40`.
 - `repaint`: display the board after successful mutations; default `false`.
 
-Select a configuration in one of three ways:
+Configuration selection order is:
 
 1. `--config PATH` for an explicit YAML file;
-2. `--board NAME` for a named board in `$KANBAN_TUI_HOME/boards/`;
-3. otherwise `$KANBAN_TUI_HOME/.kanban-tui.yaml` or `~/.kanban-tui.yaml` is used.
+2. `--board NAME` for a named board;
+3. `KANBAN_TUI_HOME` when explicitly set;
+4. XDG config path;
+5. existing legacy `~/.kanban-tui.yaml` when no XDG config exists.
 
 `--config` and `--board` are mutually exclusive.
+
+## Shell completion
+
+Click provides native completion for Bash, Zsh, and Fish. kanbanTUI also completes existing values for `--board`.
+
+Generate completion files once rather than invoking kanbanTUI on every shell startup.
+
+### Bash
+
+```bash
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/kanban-tui"
+_KANBAN_TUI_COMPLETE=bash_source kanban-tui \
+  > "${XDG_CONFIG_HOME:-$HOME/.config}/kanban-tui/completion.bash"
+printf '%s\n' 'source "${XDG_CONFIG_HOME:-$HOME/.config}/kanban-tui/completion.bash"' >> ~/.bashrc
+```
+
+Start a new Bash session after adding the source line.
+
+### Zsh
+
+```bash
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/kanban-tui"
+_KANBAN_TUI_COMPLETE=zsh_source kanban-tui \
+  > "${XDG_CONFIG_HOME:-$HOME/.config}/kanban-tui/completion.zsh"
+printf '%s\n' 'source "${XDG_CONFIG_HOME:-$HOME/.config}/kanban-tui/completion.zsh"' >> ~/.zshrc
+```
+
+Start a new Zsh session after adding the source line.
+
+### Fish
+
+```fish
+mkdir -p "$XDG_CONFIG_HOME/fish/completions"
+env _KANBAN_TUI_COMPLETE=fish_source kanban-tui > "$XDG_CONFIG_HOME/fish/completions/kanban-tui.fish"
+```
+
+If `XDG_CONFIG_HOME` is unset in Fish, use `~/.config/fish/completions/kanban-tui.fish`.
+
+Regenerate the completion file after upgrading kanbanTUI if the command surface changes.
 
 ## Named boards
 
@@ -65,8 +162,6 @@ kanban-tui --board personal add Buy groceries
 kanban-tui --board work show
 kanban-tui --board work tui
 ```
-
-Named board configurations live at `$KANBAN_TUI_HOME/boards/<name>.yaml`, with a matching `.dat` datastore by default. Board names are normalized lowercase slugs containing letters, numbers, `-`, or `_`.
 
 The lower-level explicit config mechanism remains available:
 
@@ -127,7 +222,10 @@ The CLI remains available for scripting and one-shot operations.
 
 ## Usage
 
+Running `kanban-tui` without a subcommand shows the board.
+
 ```bash
+kanban-tui
 kanban-tui show
 kanban-tui add Fix login bug
 kanban-tui edit 1 Fix login timeout handling
@@ -146,7 +244,7 @@ kanban-tui restore 1
 kanban-tui undo
 ```
 
-`start`, `done`, and `todo` move tasks directly to the requested state. The older `promote` and `regress` commands remain available as one-step transition shortcuts.
+`start`, `done`, and `todo` move tasks directly to the requested state. `promote` and `regress` remain available as one-step transition shortcuts.
 
 TODO and IN PROGRESS tasks have persistent manual ordering. Use `move <id> top`, `move <id> bottom`, `move <id> before <other-id>`, or `move <id> after <other-id>` to reprioritize a task within its current column. Completed tasks are ordered by the time they most recently entered DONE. Editing text, priority, or tags on a completed task does not make it appear newly completed.
 
@@ -211,15 +309,13 @@ kanban-tui import board.json --mode replace
 
 The versioned `kanbanTUI-board` JSON format contains every active and archived task, including IDs, states, creation/modification/completion timestamps, manual positions, priority, and tags. It is independent of the DONE display limit and `show` filters.
 
-`merge` preserves the current board and appends imported tasks. If an imported ID already exists in active or archived history, that imported task is deterministically assigned a fresh ID and the CLI reports the mapping, for example `#1->#8`. Non-conflicting imported IDs remain unchanged. `replace` replaces the selected board and preserves the imported IDs exactly.
+`merge` preserves the current board and appends imported tasks. If an imported ID already exists in active or archived history, that imported task is deterministically assigned a fresh ID and the CLI reports the mapping. Non-conflicting imported IDs remain unchanged. `replace` replaces the selected board and preserves imported IDs exactly.
 
 Both modes validate the complete import and configured TODO/WIP capacities before writing. Imports that produce no effective board changes do not write the datastore or replace the current undo snapshot. A successful mutating import can be reverted with `undo`.
 
 ## Board view and filters
 
 The table view renders one task per row, wraps long descriptions, shows TODO/WIP capacity, marks full columns, displays metadata, and provides actionable empty states.
-
-`show` supports state, text, priority, and tag filtering without changing the board:
 
 ```bash
 kanban-tui show --state todo
@@ -247,14 +343,34 @@ kanban-tui show --format json
 ```
 
 - `table` is the default Rich terminal view.
-- `plain` emits deterministic tab-separated text, including timestamps, priority, and tags, without color codes.
-- `json` emits structured task data with timezone-aware ISO 8601 `created_at`, `modified_at`, and `completed_at` values plus priority and tags.
+- `plain` emits deterministic tab-separated text without color codes.
+- `json` emits structured task data with timezone-aware ISO 8601 timestamps plus priority and tags.
 
 Filters and sorting apply consistently to all three formats. All formats use the configured completed-task display limit. Rich output honors `NO_COLOR`.
 
 ## Persistence behavior
 
 Reading a board is side-effect free. If the selected datastore does not exist yet, read-only commands and TUI startup see an empty board without creating a file or printing initialization messages. The datastore is created only when a mutation actually succeeds.
+
+## Development
+
+End-user installation uses pipx. Development should use a project virtual environment rather than Arch's system Python site-packages:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
+```
+
+Run local checks:
+
+```bash
+pytest
+pytest --cov=kanban_tui --cov-report=term-missing
+ruff check .
+ruff format --check .
+mypy src/kanban_tui
+```
 
 ## Project structure
 
@@ -276,39 +392,6 @@ tests/
 ```
 
 See [`docs/architecture.md`](docs/architecture.md) for module responsibilities and persistence behavior. See [`CHANGELOG.md`](CHANGELOG.md) for version history.
-
-## Development
-
-Run tests:
-
-```bash
-pytest
-```
-
-Run coverage:
-
-```bash
-pytest --cov=kanban_tui --cov-report=term-missing
-```
-
-Lint and verify formatting:
-
-```bash
-ruff check .
-ruff format --check .
-```
-
-Apply formatting:
-
-```bash
-ruff format .
-```
-
-Run static type checking:
-
-```bash
-mypy src/kanban_tui
-```
 
 ## Maintainer
 
