@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from pathlib import Path
 
 import click
 import pytest
@@ -6,9 +7,9 @@ import yaml
 from textual.widgets import Static
 
 from kanban_tui.cli import main
-from kanban_tui.config import get_board_config_path, validate_config
-from kanban_tui.models import Board, Task, TaskPriority, TaskState
-from kanban_tui.rendering import task_rich_text
+from kanban_tui.config import get_board_config_path, get_config_path, validate_config
+from kanban_tui.models import AppConfig, Board, Task, TaskPriority, TaskState
+from kanban_tui.rendering import render_board, task_rich_text
 from kanban_tui.themes import DEFAULT_THEME, get_theme, theme_names
 from kanban_tui.tui import KanbanApp
 
@@ -66,13 +67,13 @@ def test_theme_cli_lists_sets_and_reports_selected_theme(runner, write_config):
 
 
 def test_config_set_theme_uses_same_validation(runner, write_config):
-    config = write_config()
+    write_config()
 
     changed = runner.invoke(main, ["config", "set", "theme", "gruvbox"])
     invalid = runner.invoke(main, ["config", "set", "theme", "missing"])
 
     assert changed.exit_code == 0
-    raw = yaml.safe_load(config.data_path.with_name(".kanban-tui.yaml").read_text())
+    raw = yaml.safe_load(get_config_path().read_text(encoding="utf-8"))
     assert raw["theme"] == "gruvbox"
     assert invalid.exit_code != 0
     assert "unknown theme" in invalid.output
@@ -111,6 +112,30 @@ def test_rich_task_text_uses_theme_semantic_styles():
     assert rendered.plain == "[1] !urgent Fix login #backend"
     assert any(theme.priority_urgent in style for style in styles)
     assert any(theme.accent in style for style in styles)
+
+
+def test_no_color_disables_rich_ansi(monkeypatch, capsys):
+    config = AppConfig(data_path=Path("/tmp/unused"), theme="dracula")
+    board = Board(
+        active={
+            1: Task(
+                1,
+                TaskState.TODO,
+                "Fix login",
+                STAMP,
+                STAMP,
+                priority=TaskPriority.URGENT,
+                tags=("backend",),
+            )
+        }
+    )
+    monkeypatch.setenv("NO_COLOR", "1")
+
+    render_board(config, board, "test")
+    output = capsys.readouterr().out
+
+    assert "Fix login" in output
+    assert "\x1b[" not in output
 
 
 async def test_tui_applies_selected_palette(write_config):
