@@ -56,6 +56,19 @@ Current maintained kanbanTUI baseline.
 - reserve `default` as the implicit default board name to avoid named-board ambiguity;
 - added focused regression coverage for cross-process lock lifecycle, schema constraints, import limits, internal path protection, TUI restore input, task-ID validation, and reserved board naming.
 
+### Arch Linux integration
+
+- made Arch Linux the primary documented developer/desktop target;
+- changed end-user installation guidance to Arch's `python-pipx` package plus direct Git installation, avoiding system-site `pip install` usage;
+- adopted XDG config/data defaults: `~/.config/kanban-tui/` and `~/.local/share/kanban-tui/`, honoring `XDG_CONFIG_HOME` and `XDG_DATA_HOME`;
+- retained safe discovery of existing `~/.kanban-tui.yaml` and legacy `~/boards/` configurations when no XDG config exists;
+- retained `KANBAN_TUI_HOME` as an explicit portable/test root override;
+- added Bash, Zsh and Fish completion documentation using Click's native completion protocol;
+- added dynamic completion for existing `--board` names;
+- removed the `click-default-group` runtime dependency and implemented no-argument board display directly with `click.Group`;
+- added Python 3.14 project metadata for the current Arch Python generation;
+- added regression coverage for XDG paths, legacy discovery, native shell completion and no-argument root behavior.
+
 ### Maintainer
 
 Pascal Rothe <ibirothe@gmail.com>
