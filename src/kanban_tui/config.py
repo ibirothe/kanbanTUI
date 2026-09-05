@@ -10,21 +10,73 @@ import yaml
 from .models import AppConfig, Limits
 
 
+APP_DIR_NAME = "kanban-tui"
+LEGACY_CONFIG_NAME = ".kanban-tui.yaml"
 BOARD_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 RESERVED_BOARD_NAMES = {"default"}
 LIMIT_NAMES = {"todo", "wip", "done", "taskname"}
 
 
-def get_app_home() -> Path:
+def _portable_home() -> Path | None:
     configured_home = os.environ.get("KANBAN_TUI_HOME")
-    home = Path(configured_home).expanduser() if configured_home else Path.home()
-    return home.resolve()
+    if not configured_home:
+        return None
+    return Path(configured_home).expanduser().resolve()
+
+
+def _xdg_root(env_name: str, fallback: Path) -> Path:
+    configured = os.environ.get(env_name)
+    root = Path(configured).expanduser() if configured else fallback
+    return root.resolve()
+
+
+def get_config_root() -> Path:
+    portable = _portable_home()
+    if portable is not None:
+        return portable
+    return _xdg_root("XDG_CONFIG_HOME", Path.home() / ".config") / APP_DIR_NAME
+
+
+def get_data_root() -> Path:
+    portable = _portable_home()
+    if portable is not None:
+        return portable
+    return _xdg_root("XDG_DATA_HOME", Path.home() / ".local" / "share") / APP_DIR_NAME
+
+
+def get_app_home() -> Path:
+    """Return the application root used for portable/legacy callers."""
+    return get_config_root()
+
+
+def get_legacy_config_path() -> Path:
+    return (Path.home() / LEGACY_CONFIG_NAME).resolve()
+
+
+def get_legacy_boards_dir() -> Path:
+    return (Path.home() / "boards").resolve()
 
 
 def get_config_path(explicit_path: Path | None = None) -> Path:
     if explicit_path is not None:
         return explicit_path.expanduser().resolve()
-    return get_app_home() / ".kanban-tui.yaml"
+
+    portable = _portable_home()
+    if portable is not None:
+        return portable / LEGACY_CONFIG_NAME
+
+    xdg_path = get_config_root() / "config.yaml"
+    legacy_path = get_legacy_config_path()
+    if not xdg_path.exists() and legacy_path.exists():
+        return legacy_path
+    return xdg_path
+
+
+def get_default_data_path() -> Path:
+    portable = _portable_home()
+    if portable is not None:
+        return portable / ".kanban-tui.dat"
+    return get_data_root() / "board.dat"
 
 
 def validate_board_name(name: str) -> str:
@@ -39,23 +91,41 @@ def validate_board_name(name: str) -> str:
 
 
 def get_boards_dir() -> Path:
-    return get_app_home() / "boards"
+    return get_config_root() / "boards"
 
 
 def get_board_config_path(name: str) -> Path:
-    return get_boards_dir() / f"{validate_board_name(name)}.yaml"
+    normalized = validate_board_name(name)
+    xdg_path = get_boards_dir() / f"{normalized}.yaml"
+    if _portable_home() is not None:
+        return xdg_path
+
+    legacy_path = get_legacy_boards_dir() / f"{normalized}.yaml"
+    if not xdg_path.exists() and legacy_path.exists():
+        return legacy_path
+    return xdg_path
+
+
+def get_board_data_path(name: str) -> Path:
+    normalized = validate_board_name(name)
+    if _portable_home() is not None:
+        return get_boards_dir() / f"{normalized}.dat"
+    return get_data_root() / "boards" / f"{normalized}.dat"
 
 
 def list_named_boards() -> list[str]:
-    boards_dir = get_boards_dir()
-    if not boards_dir.exists():
-        return []
+    names: set[str] = set()
+    directories = [get_boards_dir()]
+    if _portable_home() is None:
+        directories.append(get_legacy_boards_dir())
 
-    names = []
-    for path in boards_dir.glob("*.yaml"):
-        name = path.stem
-        if BOARD_NAME_PATTERN.fullmatch(name) and name not in RESERVED_BOARD_NAMES:
-            names.append(name)
+    for boards_dir in directories:
+        if not boards_dir.exists():
+            continue
+        for path in boards_dir.glob("*.yaml"):
+            name = path.stem
+            if BOARD_NAME_PATTERN.fullmatch(name) and name not in RESERVED_BOARD_NAMES:
+                names.add(name)
     return sorted(names)
 
 
@@ -172,7 +242,10 @@ def write_config_document(
 
 def create_default_config(explicit_path: Path | None = None) -> Path:
     config_path = get_config_path(explicit_path)
-    data_path = config_path.with_suffix(".dat")
+    if explicit_path is not None or config_path == get_legacy_config_path():
+        data_path = config_path.with_suffix(".dat")
+    else:
+        data_path = get_default_data_path()
     _atomic_write_config(config_path, {"data_path": str(data_path)})
     return config_path
 
@@ -182,7 +255,9 @@ def create_named_board(name: str) -> Path:
     config_path = get_board_config_path(normalized)
     if config_path.exists():
         raise click.ClickException(f"Board '{normalized}' already exists.")
-    return create_default_config(config_path)
+    data_path = get_board_data_path(normalized)
+    _atomic_write_config(config_path, {"data_path": str(data_path)})
+    return config_path
 
 
 def set_config_value(
