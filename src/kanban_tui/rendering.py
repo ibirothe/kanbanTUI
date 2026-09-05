@@ -4,6 +4,7 @@ import os
 from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
+from rich.text import Text
 
 from .models import (
     AppConfig,
@@ -13,6 +14,7 @@ from .models import (
     TaskState,
     format_timestamp,
 )
+from .themes import DEFAULT_THEME, Theme, get_theme
 
 
 SORT_CHOICES = ("default", "id", "created", "modified")
@@ -119,6 +121,23 @@ def task_display_text(task: Task) -> str:
     parts.append(task.text)
     parts.extend(f"#{tag}" for tag in task.tags)
     return " ".join(parts)
+
+
+def task_rich_text(task: Task, theme: Theme) -> Text:
+    """Render a task using semantic colors from one shared theme palette."""
+    result = Text()
+    result.append(f"[{task.id}]", style=theme.muted)
+    result.append(" ")
+    if task.priority is not None:
+        result.append(
+            f"!{task.priority.value}",
+            style=f"bold {theme.priority_color(task.priority.value)}",
+        )
+        result.append(" ")
+    result.append(task.text, style=theme.text)
+    for tag in task.tags:
+        result.append(f" #{tag}", style=theme.accent)
+    return result
 
 
 def split_items(board: Board):
@@ -286,6 +305,14 @@ def _table_tasks(
     }
 
 
+def _state_color(theme: Theme, state: TaskState) -> str:
+    return {
+        TaskState.TODO: theme.todo,
+        TaskState.IN_PROGRESS: theme.wip,
+        TaskState.DONE: theme.done,
+    }[state]
+
+
 def render_board(
     config: AppConfig,
     board: Board,
@@ -316,6 +343,7 @@ def render_board(
     if output_format != "table":
         raise ValueError(f"unsupported output format: {output_format}")
 
+    theme = get_theme(config.theme)
     console = Console(no_color=bool(os.environ.get("NO_COLOR")))
     filtered = (
         state_filter is not None
@@ -342,12 +370,15 @@ def render_board(
             return
         table = Table(show_header=True, show_footer=True)
         table.add_column(
-            column_label(config, board, state_filter, visible_count=len(tasks)),
+            Text(
+                column_label(config, board, state_filter, visible_count=len(tasks)),
+                style=f"bold {_state_color(theme, state_filter)}",
+            ),
             overflow="fold",
             footer=f"kanbanTUI v.{version}",
         )
         for task in tasks:
-            table.add_row(escape(task_display_text(task)))
+            table.add_row(task_rich_text(task, theme))
         console.print(table)
         return
 
@@ -369,16 +400,40 @@ def render_board(
 
     table = Table(show_header=True, show_footer=True, expand=True)
     table.add_column(
-        f"[bold yellow]{column_label(config, board, TaskState.TODO, visible_count=len(columns[TaskState.TODO]))}[/bold yellow]",
+        Text(
+            column_label(
+                config,
+                board,
+                TaskState.TODO,
+                visible_count=len(columns[TaskState.TODO]),
+            ),
+            style=f"bold {theme.todo}",
+        ),
         overflow="fold",
         footer="kanbanTUI",
     )
     table.add_column(
-        f"[bold green]{column_label(config, board, TaskState.IN_PROGRESS, visible_count=len(columns[TaskState.IN_PROGRESS]))}[/bold green]",
+        Text(
+            column_label(
+                config,
+                board,
+                TaskState.IN_PROGRESS,
+                visible_count=len(columns[TaskState.IN_PROGRESS]),
+            ),
+            style=f"bold {theme.wip}",
+        ),
         overflow="fold",
     )
     table.add_column(
-        f"[bold magenta]{column_label(config, board, TaskState.DONE, visible_count=len(columns[TaskState.DONE]))}[/bold magenta]",
+        Text(
+            column_label(
+                config,
+                board,
+                TaskState.DONE,
+                visible_count=len(columns[TaskState.DONE]),
+            ),
+            style=f"bold {theme.done}",
+        ),
         overflow="fold",
         footer=f"v.{version}",
     )
@@ -388,20 +443,19 @@ def render_board(
         row = []
         for state in [TaskState.TODO, TaskState.IN_PROGRESS, TaskState.DONE]:
             tasks = columns[state]
-            row.append(
-                escape(task_display_text(tasks[index])) if index < len(tasks) else ""
-            )
+            row.append(task_rich_text(tasks[index], theme) if index < len(tasks) else "")
         table.add_row(*row)
     console.print(table)
 
 
-def render_history(board: Board) -> None:
+def render_history(board: Board, config: AppConfig | None = None) -> None:
+    theme = get_theme(config.theme if config is not None else DEFAULT_THEME)
     table = Table(show_header=True)
-    table.add_column("id", justify="right")
-    table.add_column("task")
+    table.add_column("id", justify="right", style=theme.muted)
+    table.add_column("task", style=theme.text)
     table.add_column("metadata")
-    table.add_column("archived / modified")
-    table.add_column("created")
+    table.add_column("archived / modified", style=theme.muted)
+    table.add_column("created", style=theme.muted)
 
     deleted_tasks = sorted(
         board.deleted.values(),
@@ -409,14 +463,20 @@ def render_history(board: Board) -> None:
         reverse=True,
     )
     for task in deleted_tasks:
-        metadata = []
+        metadata = Text()
         if task.priority is not None:
-            metadata.append(f"!{task.priority.value}")
-        metadata.extend(f"#{tag}" for tag in task.tags)
+            metadata.append(
+                f"!{task.priority.value}",
+                style=f"bold {theme.priority_color(task.priority.value)}",
+            )
+        for tag in task.tags:
+            if metadata:
+                metadata.append(" ")
+            metadata.append(f"#{tag}", style=theme.accent)
         table.add_row(
             str(task.id),
             escape(task.text),
-            " ".join(metadata),
+            metadata,
             format_timestamp(task.modified_at),
             format_timestamp(task.created_at),
         )
