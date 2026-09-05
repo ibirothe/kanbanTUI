@@ -29,6 +29,7 @@ from .services import (
     update_task_tag,
 )
 from .storage import datastore_lock, read_data, undo_last_change, write_data
+from .themes import get_theme, theme_names
 from .transfer import (
     merge_boards,
     read_export,
@@ -225,6 +226,7 @@ def config_show():
     config = _read_config()
     click.echo(f"path: {path}")
     click.echo(f"data_path: {config.data_path}")
+    click.echo(f"theme: {config.theme}")
     click.echo(
         "limits.todo: "
         + (str(config.limits.todo) if config.limits.todo is not None else "unlimited")
@@ -245,6 +247,36 @@ def config_set(key, value):
     """Set one supported configuration value."""
     path = set_config_value(key, value, _selected_config_path())
     click.echo(f"Updated {key} in {path}")
+
+
+@main.group(name="theme")
+def theme_commands():
+    """Inspect and select the color theme for the selected board."""
+
+
+@theme_commands.command(name="list")
+def theme_list():
+    """List built-in themes and mark the selected one."""
+    current = _read_config().theme
+    for name in theme_names():
+        theme = get_theme(name)
+        marker = "*" if name == current else " "
+        click.echo(f"{marker} {name}\t{theme.description}")
+
+
+@theme_commands.command(name="current")
+def theme_current():
+    """Print the selected theme name."""
+    click.echo(_read_config().theme)
+
+
+@theme_commands.command(name="set")
+@click.argument("name", type=click.Choice(theme_names(), case_sensitive=False))
+def theme_set(name):
+    """Persist a built-in theme for the selected board."""
+    normalized = get_theme(name).name
+    path = set_config_value("theme", normalized, _selected_config_path())
+    click.echo(f"Theme set to {normalized} in {path}")
 
 
 @main.command()
@@ -580,4 +612,4 @@ def history():
     """Show archived task history."""
     config = _read_config()
     board = read_data(config, initialize_missing=False)
-    render_history(board)
+    render_history(board, config)
