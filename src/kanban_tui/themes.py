@@ -4,6 +4,7 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+import click
 import yaml
 
 
@@ -25,6 +26,10 @@ COLOR_ROLES = (
     "priority_high",
     "priority_urgent",
 )
+
+
+class ThemeError(click.ClickException, ValueError):
+    """Theme validation error suitable for config validation and CLI display."""
 
 
 @dataclass(frozen=True)
@@ -155,10 +160,10 @@ def get_user_theme_dir() -> Path:
 
 def _normalize_theme_name(name: str) -> str:
     if not isinstance(name, str):
-        raise ValueError("theme name must be a string")
+        raise ThemeError("theme name must be a string")
     normalized = name.strip().lower()
     if not THEME_NAME_PATTERN.fullmatch(normalized):
-        raise ValueError(
+        raise ThemeError(
             "theme names must be 1-32 lowercase letters/numbers and may contain - or _"
         )
     return normalized
@@ -169,13 +174,13 @@ def _custom_theme_paths() -> list[Path]:
     if not theme_dir.exists():
         return []
     if not theme_dir.is_dir():
-        raise ValueError(f"custom theme path is not a directory: {theme_dir}")
+        raise ThemeError(f"custom theme path is not a directory: {theme_dir}")
 
     paths = sorted(theme_dir.glob("*.yaml"), key=lambda path: path.name.casefold())
     for path in paths:
         name = _normalize_theme_name(path.stem)
         if name in THEMES:
-            raise ValueError(
+            raise ThemeError(
                 f"custom theme {path} uses reserved built-in name {name!r}"
             )
     return paths
@@ -183,7 +188,7 @@ def _custom_theme_paths() -> list[Path]:
 
 def _validate_color(role: str, value: object, path: Path) -> str:
     if not isinstance(value, str) or not HEX_COLOR_PATTERN.fullmatch(value.strip()):
-        raise ValueError(
+        raise ThemeError(
             f"custom theme {path}: colors.{role} must be a #RRGGBB color"
         )
     return value.strip().lower()
@@ -196,47 +201,49 @@ def _theme_color_mapping(theme: Theme) -> dict[str, str]:
 def _load_custom_theme(path: Path) -> Theme:
     name = _normalize_theme_name(path.stem)
     if name in THEMES:
-        raise ValueError(f"custom theme {path} uses reserved built-in name {name!r}")
+        raise ThemeError(f"custom theme {path} uses reserved built-in name {name!r}")
 
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     except OSError as exc:
-        raise ValueError(f"could not read custom theme {path}: {exc}") from exc
+        raise ThemeError(f"could not read custom theme {path}: {exc}") from exc
     except yaml.YAMLError as exc:
-        raise ValueError(f"custom theme {path} contains invalid YAML: {exc}") from exc
+        raise ThemeError(f"custom theme {path} contains invalid YAML: {exc}") from exc
 
     if not isinstance(raw, dict):
-        raise ValueError(f"custom theme {path} must contain a YAML mapping")
+        raise ThemeError(f"custom theme {path} must contain a YAML mapping")
 
     allowed_keys = {"description", "extends", "colors"}
     unknown_keys = sorted(set(raw) - allowed_keys)
     if unknown_keys:
         keys = ", ".join(str(key) for key in unknown_keys)
-        raise ValueError(f"custom theme {path} has unknown keys: {keys}")
+        raise ThemeError(f"custom theme {path} has unknown keys: {keys}")
 
     raw_base = raw.get("extends", DEFAULT_THEME)
     if not isinstance(raw_base, str):
-        raise ValueError(f"custom theme {path}: extends must be a built-in theme name")
+        raise ThemeError(f"custom theme {path}: extends must be a built-in theme name")
     base_name = _normalize_theme_name(raw_base)
     if base_name not in THEMES:
         choices = ", ".join(THEMES)
-        raise ValueError(
+        raise ThemeError(
             f"custom theme {path}: extends must be one of the built-in themes: {choices}"
         )
     base = THEMES[base_name]
 
     description = raw.get("description", f"Custom theme based on {base_name}")
     if not isinstance(description, str) or not description.strip():
-        raise ValueError(f"custom theme {path}: description must be a non-empty string")
+        raise ThemeError(
+            f"custom theme {path}: description must be a non-empty string"
+        )
 
     raw_colors = raw.get("colors", {})
     if not isinstance(raw_colors, dict):
-        raise ValueError(f"custom theme {path}: colors must be a mapping")
+        raise ThemeError(f"custom theme {path}: colors must be a mapping")
 
     unknown_roles = sorted(set(raw_colors) - set(COLOR_ROLES))
     if unknown_roles:
         roles = ", ".join(str(role) for role in unknown_roles)
-        raise ValueError(f"custom theme {path} has unknown color roles: {roles}")
+        raise ThemeError(f"custom theme {path} has unknown color roles: {roles}")
 
     colors = _theme_color_mapping(base)
     for role, value in raw_colors.items():
@@ -299,4 +306,4 @@ def get_theme(name: str) -> Theme:
         return _load_custom_theme(path)
 
     choices = ", ".join(theme_names())
-    raise ValueError(f"unknown theme {name!r}; choose one of: {choices}")
+    raise ThemeError(f"unknown theme {name!r}; choose one of: {choices}")
