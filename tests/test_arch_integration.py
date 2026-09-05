@@ -8,8 +8,8 @@ def test_no_argument_invocation_still_shows_board(runner, write_config):
     result = runner.invoke(main, [])
 
     assert result.exit_code == 0
-    assert "TODO" in result.output
     assert "No tasks yet." in result.output
+    assert "kanban-tui add <task>" in result.output
 
 
 def test_click_generates_bash_zsh_and_fish_completion(runner):
