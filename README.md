@@ -89,6 +89,7 @@ Existing installations are not abandoned: when no XDG config exists, an existing
 Supported settings:
 
 - `data_path`: datastore path. Relative paths are resolved relative to the configuration file directory.
+- `theme`: color theme; default `arch`.
 - `limits.todo`: optional TODO capacity.
 - `limits.wip`: optional in-progress capacity.
 - `limits.done`: maximum completed tasks displayed; default `10`.
@@ -177,6 +178,7 @@ Inspect and edit the selected configuration without opening YAML manually:
 ```bash
 kanban-tui config path
 kanban-tui config show
+kanban-tui config set theme nord
 kanban-tui config set limits.wip 3
 kanban-tui config set limits.todo unlimited
 kanban-tui config set repaint true
@@ -185,11 +187,45 @@ kanban-tui config set repaint true
 The same commands work with `--board` or `--config`:
 
 ```bash
+kanban-tui --board work config set theme gruvbox
 kanban-tui --board work config set limits.wip 2
 kanban-tui --config ~/boards/custom.yaml config show
 ```
 
-Supported `config set` keys are `data_path`, `repaint`, `limits.todo`, `limits.wip`, `limits.done`, and `limits.taskname`. Optional TODO/WIP limits accept `unlimited`. Updates are validated before an atomic config-file replacement and preserve unrelated YAML fields.
+Supported `config set` keys are `data_path`, `theme`, `repaint`, `limits.todo`, `limits.wip`, `limits.done`, and `limits.taskname`. Optional TODO/WIP limits accept `unlimited`. Updates are validated before an atomic config-file replacement and preserve unrelated YAML fields.
+
+## Color themes
+
+Themes are stored per selected board/config and apply to both the Rich table output and the Textual TUI. Existing configs without a `theme` field use `arch` automatically.
+
+Built-in themes:
+
+- `arch` — Arch blue on a dark background; default.
+- `nord` — muted arctic palette.
+- `gruvbox` — warm retro palette.
+- `dracula` — high-contrast purple/cyan palette.
+- `mono` — neutral grayscale.
+
+Inspect or change the selected board theme:
+
+```bash
+kanban-tui theme list
+kanban-tui theme current
+kanban-tui theme set nord
+```
+
+Named boards can use different themes:
+
+```bash
+kanban-tui --board work theme set arch
+kanban-tui --board personal theme set gruvbox
+```
+
+The palette controls TODO/WIP/DONE colors, task metadata badges, TUI chrome, column borders, dialogs, and selection surfaces. Plain and JSON output remain color-free and stable for scripting. Set `NO_COLOR=1` to disable Rich ANSI colors regardless of the selected theme:
+
+```bash
+NO_COLOR=1 kanban-tui show
+```
 
 ## Interactive TUI
 
@@ -199,7 +235,7 @@ Launch the full-screen board with:
 kanban-tui tui
 ```
 
-The TUI uses the same configuration, datastore, validation, capacity limits, ordering rules, metadata, undo, and mutation services as the CLI.
+The TUI uses the same configuration, datastore, validation, capacity limits, ordering rules, metadata, theme, undo, and mutation services as the CLI.
 
 Keyboard controls:
 
@@ -233,6 +269,7 @@ kanban-tui priority 1 urgent
 kanban-tui tag add 1 backend
 kanban-tui tag remove 1 backend
 kanban-tui tag clear 1
+kanban-tui theme current
 kanban-tui start 1
 kanban-tui done 1
 kanban-tui todo 1
@@ -342,7 +379,7 @@ kanban-tui show --format plain
 kanban-tui show --format json
 ```
 
-- `table` is the default Rich terminal view.
+- `table` is the default Rich terminal view and uses the selected color theme.
 - `plain` emits deterministic tab-separated text without color codes.
 - `json` emits structured task data with timezone-aware ISO 8601 timestamps plus priority and tags.
 
@@ -383,6 +420,7 @@ src/kanban_tui/
   rendering.py
   services.py
   storage.py
+  themes.py
   transfer.py
   tui.py
 
