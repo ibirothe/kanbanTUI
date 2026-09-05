@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import click
-from click_default_group import DefaultGroup
 
 from . import VERSION
 from .config import (
@@ -39,11 +38,11 @@ from .transfer import (
 )
 
 
-class PrefixGroup(DefaultGroup):
+class PrefixGroup(click.Group):
     """Click group that accepts a unique command prefix."""
 
     def get_command(self, ctx, cmd_name):
-        command = click.Group.get_command(self, ctx, cmd_name)
+        command = super().get_command(ctx, cmd_name)
         if command is not None:
             return command
 
@@ -55,7 +54,7 @@ class PrefixGroup(DefaultGroup):
         if not matches:
             return None
         if len(matches) == 1:
-            return click.Group.get_command(self, ctx, matches[0])
+            return super().get_command(ctx, matches[0])
         ctx.fail("Too many matches: %s" % ", ".join(sorted(matches)))
 
 
@@ -77,6 +76,12 @@ def _effective_config_path() -> Path:
 
 def _read_config():
     return read_config(_selected_config_path())
+
+
+def _complete_board_name(ctx, param, incomplete):
+    del ctx, param
+    prefix = incomplete.casefold()
+    return [name for name in list_named_boards() if name.casefold().startswith(prefix)]
 
 
 def _echo_messages(messages: list[str]) -> None:
@@ -121,11 +126,11 @@ def _validate_export_target(path: Path, config) -> Path:
     return target
 
 
-@click.command(
+@click.group(
     name="kanban-tui",
     cls=PrefixGroup,
-    default="show",
-    default_if_no_args=True,
+    invoke_without_command=True,
+    no_args_is_help=False,
 )
 @click.version_option(VERSION)
 @click.option(
@@ -140,14 +145,18 @@ def _validate_export_target(path: Path, config) -> Path:
     "board_name",
     default=None,
     metavar="NAME",
-    help="Use a named board from $KANBAN_TUI_HOME/boards.",
+    shell_complete=_complete_board_name,
+    help="Use a named board.",
 )
-def main(config_path, board_name):
+@click.pass_context
+def main(ctx, config_path, board_name):
     """kanbanTUI: terminal personal Kanban board."""
     if config_path is not None and board_name is not None:
         raise click.UsageError("--config and --board cannot be used together.")
     if board_name is not None:
         validate_board_name(board_name)
+    if ctx.invoked_subcommand is None:
+        display()
 
 
 @main.command()
