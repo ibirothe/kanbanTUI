@@ -6,6 +6,8 @@ import yaml
 
 from kanban_tui.config import (
     create_default_config,
+    create_named_board,
+    get_board_config_path,
     get_config_path,
     read_config,
     validate_config,
@@ -66,6 +68,56 @@ def test_explicit_config_path_overrides_app_home(monkeypatch, tmp_path):
 
     assert get_config_path(explicit_path) == explicit_path.resolve()
     assert get_config_path() == (default_home / ".kanban-tui.yaml").resolve()
+
+
+def test_xdg_paths_are_default_without_portable_home(monkeypatch, tmp_path):
+    xdg_config = tmp_path / "xdg-config"
+    xdg_data = tmp_path / "xdg-data"
+    monkeypatch.delenv("KANBAN_TUI_HOME", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_data))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+    created = create_default_config()
+    raw = yaml.safe_load(created.read_text(encoding="utf-8"))
+
+    assert created == (xdg_config / "kanban-tui" / "config.yaml").resolve()
+    assert raw["data_path"] == str(
+        (xdg_data / "kanban-tui" / "board.dat").resolve()
+    )
+
+
+def test_existing_legacy_default_config_is_discovered(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    xdg_config = tmp_path / "xdg-config"
+    home.mkdir()
+    legacy = home / ".kanban-tui.yaml"
+    legacy.write_text(yaml.safe_dump({"data_path": "./legacy.dat"}), encoding="utf-8")
+
+    monkeypatch.delenv("KANBAN_TUI_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config))
+
+    assert get_config_path() == legacy.resolve()
+    assert read_config().data_path == (home / "legacy.dat").resolve()
+
+
+def test_xdg_named_board_separates_config_and_data(monkeypatch, tmp_path):
+    xdg_config = tmp_path / "xdg-config"
+    xdg_data = tmp_path / "xdg-data"
+    monkeypatch.delenv("KANBAN_TUI_HOME", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_data))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+    created = create_named_board("work")
+    raw = yaml.safe_load(created.read_text(encoding="utf-8"))
+
+    assert created == (xdg_config / "kanban-tui" / "boards" / "work.yaml").resolve()
+    assert get_board_config_path("work") == created
+    assert raw["data_path"] == str(
+        (xdg_data / "kanban-tui" / "boards" / "work.dat").resolve()
+    )
 
 
 def test_read_explicit_config_uses_its_directory_for_relative_data(tmp_path):
