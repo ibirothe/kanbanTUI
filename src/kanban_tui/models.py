@@ -5,6 +5,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from .themes import DEFAULT_THEME
+
 
 LEGACY_TIMESTAMP_FORMAT = "%Y-%b-%d %H:%M:%S"
 TAG_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
@@ -310,6 +312,7 @@ class AppConfig:
     data_path: Path
     limits: Limits = field(default_factory=Limits)
     repaint: bool = False
+    theme: str = DEFAULT_THEME
 
 
 @dataclass
