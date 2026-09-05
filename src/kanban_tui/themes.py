@@ -169,6 +169,19 @@ def _normalize_theme_name(name: str) -> str:
     return normalized
 
 
+def _theme_name_from_path(path: Path) -> str:
+    normalized = _normalize_theme_name(path.stem)
+    if path.stem != normalized:
+        raise ThemeError(
+            f"custom theme filename must be a lowercase theme slug: {path.name}"
+        )
+    if normalized in THEMES:
+        raise ThemeError(
+            f"custom theme {path} uses reserved built-in name {normalized!r}"
+        )
+    return normalized
+
+
 def _custom_theme_paths() -> list[Path]:
     theme_dir = get_user_theme_dir()
     if not theme_dir.exists():
@@ -178,11 +191,7 @@ def _custom_theme_paths() -> list[Path]:
 
     paths = sorted(theme_dir.glob("*.yaml"), key=lambda path: path.name.casefold())
     for path in paths:
-        name = _normalize_theme_name(path.stem)
-        if name in THEMES:
-            raise ThemeError(
-                f"custom theme {path} uses reserved built-in name {name!r}"
-            )
+        _theme_name_from_path(path)
     return paths
 
 
@@ -199,9 +208,7 @@ def _theme_color_mapping(theme: Theme) -> dict[str, str]:
 
 
 def _load_custom_theme(path: Path) -> Theme:
-    name = _normalize_theme_name(path.stem)
-    if name in THEMES:
-        raise ThemeError(f"custom theme {path} uses reserved built-in name {name!r}")
+    name = _theme_name_from_path(path)
 
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -214,7 +221,7 @@ def _load_custom_theme(path: Path) -> Theme:
         raise ThemeError(f"custom theme {path} must contain a YAML mapping")
 
     allowed_keys = {"description", "extends", "colors"}
-    unknown_keys = sorted(set(raw) - allowed_keys)
+    unknown_keys = [key for key in raw if key not in allowed_keys]
     if unknown_keys:
         keys = ", ".join(str(key) for key in unknown_keys)
         raise ThemeError(f"custom theme {path} has unknown keys: {keys}")
@@ -240,7 +247,7 @@ def _load_custom_theme(path: Path) -> Theme:
     if not isinstance(raw_colors, dict):
         raise ThemeError(f"custom theme {path}: colors must be a mapping")
 
-    unknown_roles = sorted(set(raw_colors) - set(COLOR_ROLES))
+    unknown_roles = [role for role in raw_colors if role not in COLOR_ROLES]
     if unknown_roles:
         roles = ", ".join(str(role) for role in unknown_roles)
         raise ThemeError(f"custom theme {path} has unknown color roles: {roles}")
@@ -258,10 +265,7 @@ def _load_custom_theme(path: Path) -> Theme:
 
 
 def _theme_name_snapshot() -> tuple[str, ...]:
-    custom_names: list[str] = []
-    for path in _custom_theme_paths():
-        theme = _load_custom_theme(path)
-        custom_names.append(theme.name)
+    custom_names = [_theme_name_from_path(path) for path in _custom_theme_paths()]
     return (*THEMES, *custom_names)
 
 
