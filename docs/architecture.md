@@ -10,30 +10,30 @@ The runtime dependency set is deliberately small: Click, PyYAML, Rich, and Textu
 
 Production code lives under `src/kanban_tui/`:
 
-- `cli.py` — Click command surface, native prefix/board completion, board/config selection, theme selection, transfer and undo wiring.
+- `cli.py` — Click command surface, native prefix/board/theme completion, board/config selection, theme selection, transfer and undo wiring.
 - `config.py` — XDG/portable/legacy path resolution, named boards, YAML validation and atomic config writes.
 - `models.py` — typed domain model and persistence-schema invariants.
 - `services.py` — task mutations and workflow/capacity business rules.
 - `storage.py` — side-effect-free reads, cross-process writer locking, atomic YAML writes and undo.
-- `themes.py` — framework-independent built-in color palettes and theme lookup.
+- `themes.py` — semantic built-in palettes plus XDG/portable custom-theme discovery and YAML validation.
 - `transfer.py` — complete JSON export/import, validation and merge ID remapping.
 - `rendering.py` — themed Rich table/history rendering plus plain/JSON views, filters and sorting.
 - `tui.py` — Textual full-screen UI using the same services, persistence layer and semantic theme palette as the CLI.
 
-Tests live under `tests/`. Focused suites cover models, services, storage, transfer, CLI, configuration, multi-board behavior, metadata, undo, themes, TUI behavior, Arch/XDG integration and production-readiness invariants.
+Tests live under `tests/`. Focused suites cover models, services, storage, transfer, CLI, configuration, multi-board behavior, metadata, undo, built-in/custom themes, TUI behavior, Arch/XDG integration and production-readiness invariants.
 
 ## CLI behavior
 
 The root command is a normal `click.Group` with `invoke_without_command=True`. Running `kanban-tui` without a subcommand calls the normal board display path, while explicit commands use the same group and unique-prefix resolution.
 
-Click's built-in shell completion protocol is used for Bash, Zsh and Fish. Choice/path parameters inherit Click completion, and `--board` adds dynamic completion from existing named board configs. Completion scripts are generated from the installed `kanban-tui` entry point and require no additional runtime package.
+Click's built-in shell completion protocol is used for Bash, Zsh and Fish. Choice/path parameters inherit Click completion, `--board` adds dynamic completion from existing named board configs, and theme choices are backed by a dynamic sequence so newly created custom YAML themes are visible without reinstalling or re-importing the CLI module. Completion scripts are generated from the installed `kanban-tui` entry point and require no additional runtime package.
 
 ## Runtime flow
 
 For a mutation:
 
 1. The CLI or TUI resolves the selected configuration.
-2. `config.py` validates it into `AppConfig`, including the selected color theme.
+2. `config.py` validates it into `AppConfig`, including the selected built-in or custom color theme.
 3. `storage.py` acquires an exclusive OS-backed datastore writer lock.
 4. The YAML datastore is read into a validated `Board`. A missing datastore is represented as an empty board without creating files or printing output.
 5. `services.py` applies the operation and returns `OperationResult`.
@@ -44,11 +44,31 @@ Read-only operations (`show`, `history`, export and normal TUI reads) do not acq
 
 ## Color themes
 
-`themes.py` owns the visual palette independently of Rich and Textual. A theme supplies semantic colors for background/surface/text, accent/muted content, TODO/WIP/DONE states and all four priority levels.
+`themes.py` owns the semantic visual palette shared by Rich and Textual. A theme supplies colors for background/surface/text, accent/muted content, TODO/WIP/DONE states and all four priority levels.
 
-Built-in themes are `arch`, `nord`, `gruvbox`, `dracula`, and `mono`; `arch` is the default. `AppConfig.theme` stores only the normalized built-in theme name. Existing configuration files without a `theme` field remain valid and resolve to `arch`.
+Built-in themes are `arch`, `nord`, `gruvbox`, `dracula`, and `mono`; `arch` is the default. `AppConfig.theme` stores only the normalized theme name. Existing configuration files without a `theme` field remain valid and resolve to `arch`.
 
-The selected theme is per board/config. `theme list`, `theme current`, `theme set`, and `config set theme` all operate on the currently selected default, named or explicit config.
+User-defined themes are discovered from:
+
+```text
+${XDG_CONFIG_HOME:-~/.config}/kanban-tui/themes/<name>.yaml
+```
+
+When `KANBAN_TUI_HOME` is set, discovery switches to:
+
+```text
+$KANBAN_TUI_HOME/themes/<name>.yaml
+```
+
+The filename stem is the theme name and must be a lowercase slug of at most 32 characters. Built-in names are reserved and cannot be shadowed by a user file.
+
+Custom YAML has three supported top-level fields: optional `description`, optional `extends`, and optional `colors`. `extends` defaults to `arch` and may reference built-in themes only. This deliberately prevents custom-to-custom inheritance cycles. `colors` may override any subset of the semantic roles; omitted roles are inherited from the built-in parent. Supplied colors are restricted to explicit `#RRGGBB` values so Rich and Textual receive the same deterministic color representation.
+
+Theme loading is strict: invalid YAML, unsupported top-level keys, unknown color roles, invalid colors, invalid filenames, invalid parents, and built-in-name collisions raise an actionable `ThemeError`. The error type is both a validation error and a Click exception, so config validation can wrap it with config-path context while direct theme commands produce normal CLI errors rather than tracebacks.
+
+Theme names exposed to Click use a dynamic `Sequence`. This keeps `theme set` and shell completion synchronized with files created after the CLI module was imported, which also makes headless tests deterministic.
+
+The selected theme remains per board/config. `theme list`, `theme current`, `theme set`, and `config set theme` all operate on the currently selected default, named or explicit config; custom theme definitions themselves are user-global within the active XDG/portable root.
 
 Rich and Textual consume the same `Theme` object:
 
@@ -91,11 +111,17 @@ ${XDG_CONFIG_HOME:-~/.config}/kanban-tui/boards/<name>.yaml
 ${XDG_DATA_HOME:-~/.local/share}/kanban-tui/boards/<name>.dat
 ```
 
+Custom themes use the matching config root:
+
+```text
+${XDG_CONFIG_HOME:-~/.config}/kanban-tui/themes/<name>.yaml
+```
+
 Selection semantics are:
 
 1. `--config PATH` selects an explicit file.
 2. `--board NAME` selects a named-board config.
-3. `KANBAN_TUI_HOME`, when set, switches to a portable single-root layout.
+3. `KANBAN_TUI_HOME`, when set, switches to a portable single-root layout for config, data, named boards and custom themes.
 4. Otherwise the XDG config path is used.
 5. If no XDG config exists, an existing legacy `~/.kanban-tui.yaml` is discovered. Legacy named boards below `~/boards/` remain discoverable as well.
 
