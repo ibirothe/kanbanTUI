@@ -10,16 +10,17 @@ The runtime dependency set is deliberately small: Click, PyYAML, Rich, and Textu
 
 Production code lives under `src/kanban_tui/`:
 
-- `cli.py` — Click command surface, native prefix/board completion, board/config selection, transfer and undo wiring.
+- `cli.py` — Click command surface, native prefix/board completion, board/config selection, theme selection, transfer and undo wiring.
 - `config.py` — XDG/portable/legacy path resolution, named boards, YAML validation and atomic config writes.
 - `models.py` — typed domain model and persistence-schema invariants.
 - `services.py` — task mutations and workflow/capacity business rules.
 - `storage.py` — side-effect-free reads, cross-process writer locking, atomic YAML writes and undo.
+- `themes.py` — framework-independent built-in color palettes and theme lookup.
 - `transfer.py` — complete JSON export/import, validation and merge ID remapping.
-- `rendering.py` — table, plain and JSON views, filters and sorting.
-- `tui.py` — Textual full-screen UI using the same services and persistence layer as the CLI.
+- `rendering.py` — themed Rich table/history rendering plus plain/JSON views, filters and sorting.
+- `tui.py` — Textual full-screen UI using the same services, persistence layer and semantic theme palette as the CLI.
 
-Tests live under `tests/`. Focused suites cover models, services, storage, transfer, CLI, configuration, multi-board behavior, metadata, undo, TUI behavior, Arch/XDG integration and production-readiness invariants.
+Tests live under `tests/`. Focused suites cover models, services, storage, transfer, CLI, configuration, multi-board behavior, metadata, undo, themes, TUI behavior, Arch/XDG integration and production-readiness invariants.
 
 ## CLI behavior
 
@@ -32,7 +33,7 @@ Click's built-in shell completion protocol is used for Bash, Zsh and Fish. Choic
 For a mutation:
 
 1. The CLI or TUI resolves the selected configuration.
-2. `config.py` validates it into `AppConfig`.
+2. `config.py` validates it into `AppConfig`, including the selected color theme.
 3. `storage.py` acquires an exclusive OS-backed datastore writer lock.
 4. The YAML datastore is read into a validated `Board`. A missing datastore is represented as an empty board without creating files or printing output.
 5. `services.py` applies the operation and returns `OperationResult`.
@@ -40,6 +41,23 @@ For a mutation:
 7. The previous complete board is stored as the single `_undo` snapshot in the same atomic replacement.
 
 Read-only operations (`show`, `history`, export and normal TUI reads) do not acquire the exclusive writer lock.
+
+## Color themes
+
+`themes.py` owns the visual palette independently of Rich and Textual. A theme supplies semantic colors for background/surface/text, accent/muted content, TODO/WIP/DONE states and all four priority levels.
+
+Built-in themes are `arch`, `nord`, `gruvbox`, `dracula`, and `mono`; `arch` is the default. `AppConfig.theme` stores only the normalized built-in theme name. Existing configuration files without a `theme` field remain valid and resolve to `arch`.
+
+The selected theme is per board/config. `theme list`, `theme current`, `theme set`, and `config set theme` all operate on the currently selected default, named or explicit config.
+
+Rich and Textual consume the same `Theme` object:
+
+- Rich column headers use TODO/WIP/DONE colors;
+- task priorities use priority-level colors;
+- tags use the accent color;
+- Textual uses the same palette for screen/surface colors, header/footer, column borders/titles, dialog chrome, selection surfaces and task metadata.
+
+Plain and JSON formats contain no visual styling. Rich honors `NO_COLOR`, which disables ANSI color without changing the selected persistent theme.
 
 ## Domain invariants
 
@@ -130,7 +148,7 @@ Imports are parsed into the validated domain model before persistence. Imported 
 
 The Textual TUI calls the same services and storage functions as the CLI. Validation, capacity rules, locking, undo, metadata normalization and ordering therefore have one implementation.
 
-Prompt input is routed through shared service validation, including restore IDs.
+Prompt input is routed through shared service validation, including restore IDs. Theme application is presentation-only and never changes board persistence or business-rule behavior.
 
 ## Arch installation model
 
