@@ -2,6 +2,20 @@
 
 A terminal-first personal Kanban board for developers. Arch Linux is the primary target environment; the application remains a normal Python CLI/TUI and does not require a daemon, database server, browser, or cloud account.
 
+## Quick start
+
+After [installation](#arch-linux-installation):
+
+```bash
+kanban-tui configure
+kanban-tui add My first task
+kanban-tui start 1
+kanban-tui tui
+```
+
+Use the ID printed by `add` if the board already contains tasks. Run `kanban-tui --help`
+for all commands or `kanban-tui COMMAND --help` for command options.
+
 ## Arch Linux installation
 
 kanbanTUI is intended to be installed as an isolated command-line application with `pipx`, not into Arch's system Python environment.
@@ -60,223 +74,11 @@ pipx uninstall kanbantui
 - Python 3.11 or newer. Current Arch Python 3.14 is within the supported version range.
 - A terminal suitable for Textual/Rich applications.
 
-## XDG configuration and data
+## Configuration and customization
 
-Fresh Linux installations use the XDG base directories:
-
-```text
-${XDG_CONFIG_HOME:-~/.config}/kanban-tui/config.yaml
-${XDG_DATA_HOME:-~/.local/share}/kanban-tui/board.dat
-```
-
-Create the default configuration with:
-
-```bash
-kanban-tui configure
-```
-
-Named boards use separate config and data directories:
-
-```text
-${XDG_CONFIG_HOME:-~/.config}/kanban-tui/boards/work.yaml
-${XDG_DATA_HOME:-~/.local/share}/kanban-tui/boards/work.dat
-```
-
-Existing installations are not abandoned: when no XDG config exists, an existing `~/.kanban-tui.yaml` is still discovered. Existing named-board configs under `~/boards/` are also recognized. Fresh configs and named boards use the XDG layout.
-
-`KANBAN_TUI_HOME` remains available as an explicit portable/test override. When set, kanbanTUI keeps config, data, named boards, and custom themes below that directory instead of using XDG paths.
-
-Supported settings:
-
-- `data_path`: datastore path. Relative paths are resolved relative to the configuration file directory.
-- `theme`: color theme; default `arch`.
-- `limits.todo`: optional TODO capacity.
-- `limits.wip`: optional in-progress capacity.
-- `limits.done`: maximum completed tasks displayed; default `10`.
-- `limits.taskname`: maximum task text length; default `40`.
-- `repaint`: display the board after successful mutations; default `false`.
-
-Configuration selection order is:
-
-1. `--config PATH` for an explicit YAML file;
-2. `--board NAME` for a named board;
-3. `KANBAN_TUI_HOME` when explicitly set;
-4. XDG config path;
-5. existing legacy `~/.kanban-tui.yaml` when no XDG config exists.
-
-`--config` and `--board` are mutually exclusive.
-
-## Shell completion
-
-Click provides native completion for Bash, Zsh, and Fish. kanbanTUI also completes existing values for `--board` and dynamically discovered theme names.
-
-Generate completion files once rather than invoking kanbanTUI on every shell startup.
-
-### Bash
-
-```bash
-mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/kanban-tui"
-_KANBAN_TUI_COMPLETE=bash_source kanban-tui \
-  > "${XDG_CONFIG_HOME:-$HOME/.config}/kanban-tui/completion.bash"
-printf '%s\n' 'source "${XDG_CONFIG_HOME:-$HOME/.config}/kanban-tui/completion.bash"' >> ~/.bashrc
-```
-
-Start a new Bash session after adding the source line.
-
-### Zsh
-
-```bash
-mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/kanban-tui"
-_KANBAN_TUI_COMPLETE=zsh_source kanban-tui \
-  > "${XDG_CONFIG_HOME:-$HOME/.config}/kanban-tui/completion.zsh"
-printf '%s\n' 'source "${XDG_CONFIG_HOME:-$HOME/.config}/kanban-tui/completion.zsh"' >> ~/.zshrc
-```
-
-Start a new Zsh session after adding the source line.
-
-### Fish
-
-```fish
-mkdir -p "$XDG_CONFIG_HOME/fish/completions"
-env _KANBAN_TUI_COMPLETE=fish_source kanban-tui > "$XDG_CONFIG_HOME/fish/completions/kanban-tui.fish"
-```
-
-If `XDG_CONFIG_HOME` is unset in Fish, use `~/.config/fish/completions/kanban-tui.fish`.
-
-Regenerate the completion file after upgrading kanbanTUI if the command surface changes.
-
-## Named boards
-
-Create and list named boards:
-
-```bash
-kanban-tui board create work
-kanban-tui board create personal
-kanban-tui board list
-```
-
-Use a named board with any command, including the TUI:
-
-```bash
-kanban-tui --board work add Fix production bug
-kanban-tui --board personal add Buy groceries
-kanban-tui --board work show
-kanban-tui --board work tui
-```
-
-The lower-level explicit config mechanism remains available:
-
-```bash
-kanban-tui --config ~/boards/custom.yaml configure
-kanban-tui --config ~/boards/custom.yaml show
-```
-
-## Configuration commands
-
-Inspect and edit the selected configuration without opening YAML manually:
-
-```bash
-kanban-tui config path
-kanban-tui config show
-kanban-tui config set theme nord
-kanban-tui config set limits.wip 3
-kanban-tui config set limits.todo unlimited
-kanban-tui config set repaint true
-```
-
-The same commands work with `--board` or `--config`:
-
-```bash
-kanban-tui --board work config set theme gruvbox
-kanban-tui --board work config set limits.wip 2
-kanban-tui --config ~/boards/custom.yaml config show
-```
-
-Supported `config set` keys are `data_path`, `theme`, `repaint`, `limits.todo`, `limits.wip`, `limits.done`, and `limits.taskname`. Optional TODO/WIP limits accept `unlimited`. Updates are validated before an atomic config-file replacement and preserve unrelated YAML fields.
-
-## Color themes
-
-Themes are stored per selected board/config and apply to both the Rich table output and the Textual TUI. Existing configs without a `theme` field use `arch` automatically.
-
-Built-in themes:
-
-- `arch` — Arch blue on a dark background; default.
-- `nord` — muted arctic palette.
-- `gruvbox` — warm retro palette.
-- `dracula` — high-contrast purple/cyan palette.
-- `mono` — neutral grayscale.
-
-Inspect or change the selected board theme:
-
-```bash
-kanban-tui theme list
-kanban-tui theme current
-kanban-tui theme set nord
-```
-
-Named boards can use different themes:
-
-```bash
-kanban-tui --board work theme set arch
-kanban-tui --board personal theme set gruvbox
-```
-
-### Custom YAML themes
-
-User themes are discovered automatically from:
-
-```text
-${XDG_CONFIG_HOME:-~/.config}/kanban-tui/themes/<name>.yaml
-```
-
-When `KANBAN_TUI_HOME` is set, the directory is instead:
-
-```text
-$KANBAN_TUI_HOME/themes/<name>.yaml
-```
-
-The filename stem is the theme name. Names are lowercase slugs of up to 32 characters containing letters, numbers, `-`, or `_`. Built-in names are reserved and cannot be overridden.
-
-A custom theme inherits from one built-in theme and overrides only the semantic colors you want to change:
-
-```yaml
-description: Ocean development theme
-extends: arch
-colors:
-  background: "#101820"
-  surface: "#1b2733"
-  text: "#e6edf3"
-  muted: "#8b98a5"
-  accent: "#00aaff"
-  todo: "#11bbff"
-  wip: "#ffd166"
-  done: "#7bd88f"
-  priority_low: "#7aa2b8"
-  priority_normal: "#00aaff"
-  priority_high: "#ffb347"
-  priority_urgent: "#ff6b6b"
-```
-
-`extends` may be `arch`, `nord`, `gruvbox`, `dracula`, or `mono`; it defaults to `arch`. Every supplied color must use `#RRGGBB`. The supported color roles are exactly those shown above. Unknown keys, unknown roles, invalid YAML, invalid colors, invalid filenames, and attempts to shadow a built-in theme are rejected with an actionable CLI error.
-
-For example:
-
-```bash
-mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/kanban-tui/themes"
-cp examples/theme-custom.yaml \
-  "${XDG_CONFIG_HOME:-$HOME/.config}/kanban-tui/themes/ocean.yaml"
-kanban-tui theme list
-kanban-tui theme set ocean
-kanban-tui tui
-```
-
-Custom themes are loaded on demand; they do not require reinstalling kanbanTUI. They are global theme definitions, while the selected theme name remains stored independently in each board configuration.
-
-The palette controls TODO/WIP/DONE colors, task metadata badges, TUI chrome, column borders, dialogs, and selection surfaces. Plain and JSON output remain color-free and stable for scripting. Set `NO_COLOR=1` to disable Rich ANSI colors regardless of the selected theme:
-
-```bash
-NO_COLOR=1 kanban-tui show
-```
+- [Configuration and named boards](docs/configuration.md): paths, migration, settings and board selection.
+- [Color themes](docs/themes.md): built-in palettes and custom YAML themes.
+- [Shell completion](docs/shell-completion.md): Bash, Zsh and Fish setup.
 
 ## Interactive TUI
 
@@ -442,45 +244,9 @@ Reading a board is side-effect free. If the selected datastore does not exist ye
 
 ## Development
 
-End-user installation uses pipx. Development should use a project virtual environment rather than Arch's system Python site-packages:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -e ".[dev]"
-```
-
-Run local checks:
-
-```bash
-pytest
-pytest --cov=kanban_tui --cov-report=term-missing
-ruff check .
-ruff format --check .
-mypy src/kanban_tui
-```
-
-## Project structure
-
-```text
-src/kanban_tui/
-  __init__.py
-  cli.py
-  config.py
-  models.py
-  rendering.py
-  services.py
-  storage.py
-  themes.py
-  transfer.py
-  tui.py
-
-tests/
-  conftest.py
-  test_*.py
-```
-
-See [`docs/architecture.md`](docs/architecture.md) for module responsibilities and persistence behavior. See [`CHANGELOG.md`](CHANGELOG.md) for version history.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, the shared local checks and contribution guidance.
+The [documentation index](docs/README.md) links to user references, [architecture](docs/architecture.md)
+and [maintenance](docs/maintenance.md). Version history lives in [CHANGELOG.md](CHANGELOG.md).
 
 ## Maintainer
 

@@ -1,9 +1,9 @@
 # Local application state
 .kanban-tui.yaml
 .kanban-tui.dat
-.kanban-tui.dat.lock/
+.kanban-tui.dat.lock
 *.kanban-tui.dat
-*.kanban-tui.dat.lock/
+*.kanban-tui.dat.lock
 
 # Python environments and bytecode
 .venv/
