@@ -4,6 +4,7 @@
 
 ### Fixes and quality
 
+- preserve timestamps, datastore bytes and undo history when an edit normalizes to the existing task text;
 - retain Nord as the sole built-in theme and default for new and theme-less configs; make the selected TUI task high contrast;
 - reject stale TUI task mutations inside the writer transaction; retain conflicting edit/tag drafts for explicit review and choose reorder neighbors from current data;
 - reject collisions between config, datastore and lock paths, including symlink aliases, before config creation, updates or export; preserve active lock files during reconfiguration;

@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import pytest
 
 from kanban_tui.services import OperationResult, add_tasks, edit_task
@@ -66,6 +68,34 @@ def test_failed_and_noop_transactions_preserve_snapshot(write_config):
     mutate_board(config, lambda board: add_tasks(config, board, [""]))
     mutate_board(config, lambda board: OperationResult(succeeded=1))
     assert config.data_path.read_bytes() == original
+    assert not undo_board(config).active
+
+
+@pytest.mark.parametrize(
+    "edit_time",
+    [
+        datetime(2026, 9, 6, 12, 0, tzinfo=timezone.utc),
+        datetime(2026, 9, 6, 12, 0, 2, tzinfo=timezone.utc),
+    ],
+)
+def test_identical_edit_preserves_datastore_and_previous_undo(
+    write_config, monkeypatch, edit_time
+):
+    config = write_config()
+    initial_time = datetime(2026, 9, 6, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr("kanban_tui.services.timestamp", lambda: initial_time)
+    mutate_board(config, lambda b: add_tasks(config, b, ["same"]))
+    original_modified_at = read_data(config).active[1].modified_at
+    original_bytes = config.data_path.read_bytes()
+    monkeypatch.setattr("kanban_tui.services.timestamp", lambda: edit_time)
+
+    current, result = mutate_board(
+        config, lambda b: edit_task(config, b, "1", "  same  ")
+    )
+
+    assert result.messages == ["Task #1 is unchanged."]
+    assert current.active[1].modified_at == original_modified_at
+    assert config.data_path.read_bytes() == original_bytes
     assert not undo_board(config).active
 
 
