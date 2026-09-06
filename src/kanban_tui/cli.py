@@ -15,6 +15,7 @@ from .config import (
 )
 from .models import TaskPriority, TaskState, normalize_tag
 from .rendering import SORT_CHOICES, render_board, render_history
+from .resources import resolve_board_paths
 from .services import (
     OperationResult,
     add_tasks,
@@ -130,13 +131,11 @@ def _run_state_command(ids: tuple[str, ...], target_state: TaskState) -> None:
 
 def _validate_export_target(path: Path, config) -> Path:
     target = path.expanduser().resolve()
-    data_path = config.data_path.resolve()
-    protected = {
-        _effective_config_path().resolve(),
-        data_path,
-        Path(f"{data_path}.lock").resolve(),
-    }
-    if target in protected:
+    try:
+        paths = resolve_board_paths(config.data_path, _effective_config_path())
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if target in paths.protected:
         raise click.ClickException(
             f"Export target {target} is reserved for the selected board."
         )

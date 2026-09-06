@@ -48,6 +48,21 @@ Configuration selection order is:
 
 `--config` and `--board` are mutually exclusive.
 
+## Separate config, data and lock paths
+
+The configuration, datastore and sibling `<datastore>.lock` must resolve to
+different paths. Validation includes relative paths and symlink aliases, and
+applies to `configure`, named-board creation, config updates and export targets.
+For example, a config named `board.dat.lock` cannot use `board.dat` as its datastore.
+Reconfiguring that file to use another datastore is also rejected: replacing the
+old config would replace a potentially active lock file.
+
+To recover an existing colliding layout, stop all processes using that board and
+move the configuration to a separate path, such as `config.yaml`. Keep its
+`data_path` pointing to the original datastore; if you move the config to another
+directory, adjust relative paths accordingly. Reopen using `--config config.yaml`.
+Do not remove or replace a lock file while a writer may be running.
+
 ## Named boards
 
 Create and list named boards:
@@ -96,4 +111,3 @@ kanban-tui --config ~/boards/custom.yaml config show
 ```
 
 Supported `config set` keys are `data_path`, `theme`, `repaint`, `limits.todo`, `limits.wip`, `limits.done`, and `limits.taskname`. Optional TODO/WIP limits accept `unlimited`. Updates are validated before an atomic config-file replacement and preserve unrelated YAML fields.
-
