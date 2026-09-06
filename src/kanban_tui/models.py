@@ -33,10 +33,10 @@ def parse_timestamp(value: Any) -> datetime:
 
 
 def format_timestamp(value: datetime) -> str:
-    """Serialize a timestamp as timezone-aware ISO 8601 to second precision."""
+    """Serialize a timestamp as timezone-aware ISO 8601 without losing precision."""
     if value.tzinfo is None:
         value = value.astimezone()
-    return value.isoformat(timespec="seconds")
+    return value.isoformat(timespec="auto")
 
 
 def normalize_tag(value: str) -> str:
