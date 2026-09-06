@@ -210,6 +210,10 @@ def edit_task(
         return result
     assert text is not None
 
+    if task.text == text:
+        result.success(f"Task #{numeric_id} is unchanged.")
+        return result
+
     task.text = text
     task.modified_at = timestamp()
     result.success(f"Updated #{numeric_id}: {text}")

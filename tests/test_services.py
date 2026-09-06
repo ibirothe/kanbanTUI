@@ -91,6 +91,24 @@ def test_edit_updates_text_without_changing_task_identity_state_or_position():
     assert result.messages == ["Updated #1: new task text"]
 
 
+def test_edit_with_normalized_identical_text_is_unchanged(monkeypatch):
+    original = task(1, TaskState.IN_PROGRESS, "same", position=4)
+    board = Board(active={1: original})
+
+    def unexpected_timestamp():
+        raise AssertionError("unchanged edit must not request a timestamp")
+
+    monkeypatch.setattr("kanban_tui.services.timestamp", unexpected_timestamp)
+
+    result = edit_task(base_config(), board, "1", "  same  ")
+
+    assert result.ok
+    assert result.succeeded == 1
+    assert result.messages == ["Task #1 is unchanged."]
+    assert board.active[1] is original
+    assert original.modified_at == NOW
+
+
 def test_edit_deleted_task_is_rejected():
     board = Board(deleted={1: task(1, TaskState.DELETED, "old")})
 

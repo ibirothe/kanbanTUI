@@ -160,6 +160,25 @@ async def test_prompt_allows_unrelated_task_change(write_config):
     ]
 
 
+async def test_unchanged_edit_prompt_closes_without_replacing_undo(write_config):
+    config = write_config()
+    mutate_board(config, lambda b: add_tasks(config, b, ["same"]))
+    original = config.data_path.read_bytes()
+    app = KanbanApp(config)
+
+    async with app.run_test() as pilot:
+        await pilot.press("e")
+        app.screen.query_one(Input).value = "  same  "
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert not isinstance(app.screen, PromptScreen)
+        assert "Task #1 is unchanged." in str(app.query_one("#status", Static).render())
+
+    assert config.data_path.read_bytes() == original
+    assert not undo_board(config).active
+
+
 @pytest.mark.parametrize("key", ["p", "right", "d", "shift+up"])
 async def test_stale_shortcuts_reject_then_refresh(write_config, key):
     config = write_config()
