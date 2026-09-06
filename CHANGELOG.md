@@ -4,6 +4,7 @@
 
 ### Fixes and quality
 
+- add a strict versioned datastore codec that rejects duplicate YAML keys, unknown fields and unsupported schemas without mutating data;
 - preserve timestamp microseconds across persistence, JSON and undo so DONE ordering remains stable within one second;
 - preserve timestamps, datastore bytes and undo history when an edit normalizes to the existing task text;
 - retain Nord as the sole built-in theme and default for new and theme-less configs; make the selected TUI task high contrast;

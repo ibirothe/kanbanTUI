@@ -1,11 +1,11 @@
 """Application transaction boundaries shared by terminal adapters."""
 
-import json
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import datetime
 
-from .models import AppConfig, Board, Task, TaskState
+from .models import AppConfig, Board, Task, TaskPriority, TaskState
 from .services import OperationResult
 from .storage import datastore_lock, read_data, undo_last_change, write_data
 
@@ -16,14 +16,28 @@ class TaskExpectation:
 
     task_id: int
     archived: bool
-    record: str
+    state: TaskState
+    text: str
+    modified_at: datetime
+    created_at: datetime
+    position: int
+    priority: TaskPriority | None
+    tags: tuple[str, ...]
+    completed_at: datetime | None
 
     @classmethod
     def capture(cls, task: Task) -> "TaskExpectation":
         return cls(
             task.id,
             task.state is TaskState.DELETED,
-            json.dumps(task.to_record(), sort_keys=True),
+            task.state,
+            task.text,
+            task.modified_at,
+            task.created_at,
+            task.position,
+            task.priority,
+            task.tags,
+            task.completed_at,
         )
 
     def matches(self, board: Board) -> bool:
@@ -56,7 +70,7 @@ def mutate_board(
                 raise TaskConflict(board, expected.task_id)
         previous = deepcopy(board)
         result = operation(board)
-        if result.succeeded and board.to_mapping() != previous.to_mapping():
+        if result.succeeded and board != previous:
             write_data(config, board, previous=previous)
         else:
             board = previous

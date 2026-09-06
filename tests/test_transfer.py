@@ -107,6 +107,34 @@ def test_invalid_export_format_and_duplicate_ids_are_rejected():
         board_from_export(payload)
 
 
+@pytest.mark.parametrize("version", [True, "1", 1.0])
+def test_export_version_must_be_a_strict_integer(version):
+    with pytest.raises(ValueError, match="version must be an integer"):
+        board_from_export(
+            {"format": EXPORT_FORMAT, "version": version, "active": [], "archived": []}
+        )
+
+
+def test_export_rejects_unknown_envelope_and_task_fields():
+    with pytest.raises(ValueError, match="export contains unknown fields"):
+        board_from_export(
+            {
+                "format": EXPORT_FORMAT,
+                "version": EXPORT_VERSION,
+                "active": [],
+                "archived": [],
+                "schema_version": 1,
+            }
+        )
+
+    task_payload = export_payload(Board(active={1: task(1, TaskState.TODO, "one")}))
+    active = task_payload["active"]
+    assert isinstance(active, list) and isinstance(active[0], dict)
+    active[0]["future"] = "value"
+    with pytest.raises(ValueError, match="task entry contains unknown fields"):
+        board_from_export(task_payload)
+
+
 def test_import_rejects_empty_task_text_and_inconsistent_completion_state():
     base = {
         "id": 1,

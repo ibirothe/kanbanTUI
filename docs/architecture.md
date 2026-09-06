@@ -18,6 +18,7 @@ Production code lives under `src/kanban_tui/`:
 - `atomic.py` — shared same-directory temporary-file lifecycle and cleanup.
 - `transactions.py` — shared lock/read/mutate/write and undo application boundaries.
 - `storage.py` — side-effect-free reads, cross-process writer locking, atomic YAML writes and undo.
+- `codec.py` — strict YAML parsing, datastore schema versioning and legacy record migration.
 - `themes.py` — semantic built-in palettes plus XDG/portable custom-theme discovery and YAML validation.
 - `transfer.py` — complete JSON export/import, validation and merge ID remapping.
 - `rendering.py` — themed Rich table/history rendering plus plain/JSON views, filters and sorting.
@@ -38,7 +39,7 @@ For a mutation:
 1. The CLI or TUI resolves the selected configuration.
 2. `config.py` validates it into `AppConfig`, including the selected built-in or custom color theme.
 3. `transactions.py` owns the mutation boundary and acquires the datastore writer lock through `storage.py`.
-4. The YAML datastore is read into a validated `Board`. A missing datastore is represented as an empty board without creating files or printing output.
+4. The YAML datastore is decoded by `codec.py` into a validated `Board`. A missing datastore is represented as an empty board without creating files or printing output.
    Snapshot-dependent TUI commands then compare their task expectations against this current board while still holding the writer lock. A conflict returns the current board through `TaskConflict` before the operation or any write occurs.
 5. The transaction captures a detached pre-mutation board; `services.py` applies the operation and returns `OperationResult`.
 6. Only a successful semantic mutation writes the datastore.
@@ -162,13 +163,15 @@ Datastore writes use a temporary file in the datastore directory, flush and `fsy
 
 ## Datastore schema
 
-The current YAML task record is a compact list. The first five fields are state, text, modified time, creation time and manual position. An optional sixth mapping carries priority, tags and/or completion time.
+The datastore envelope uses integer `schema_version: 1`, plus `data`, `deleted` and an optional `_undo` snapshot. Undo snapshots use the same versioned board envelope without nested undo history. The current YAML task record is a compact list: state, text, modified time, creation time and manual position, followed by an optional sixth mapping carrying priority, tags and/or completion time.
 
-Valid legacy four-field records remain readable. Legacy timestamps are accepted and normalized to timezone-aware `datetime` values. Numeric positions and IDs are validated strictly; fractional values are not coerced.
+`codec.py` owns this representation; the `Task` and `Board` domain models contain only domain state and invariants. The YAML loader rejects duplicate keys at every mapping level before dictionaries are constructed. Current envelopes, task metadata and records use explicit field allowlists. Unknown versions or fields are rejected rather than silently discarded.
+
+Unversioned legacy envelopes and their known four-, five- and six-field records remain readable. Legacy timestamps are accepted and normalized to timezone-aware `datetime` values. Numeric positions and IDs are validated strictly; fractional values are not coerced. Reading legacy data has no write side effect; the next successful mutation writes schema version 1 while preserving all known fields.
 
 ## Undo
 
-The datastore may contain a top-level `_undo` mapping. `Board.from_mapping()` ignores that internal key during normal reads.
+The datastore may contain a top-level `_undo` mapping. The codec validates it independently and exposes it to the storage layer as an optional previous `Board`.
 
 Each successful semantic mutation writes the new board and immediately previous board snapshot together in one atomic replacement. Failed operations, already-satisfied reorders and imports that result in no effective board change do not replace the undo snapshot.
 
@@ -176,7 +179,7 @@ Each successful semantic mutation writes the new board and immediately previous 
 
 ## Transfer format
 
-Complete transfer uses the versioned `kanbanTUI-board` JSON envelope, version 1. Exports include all active and archived tasks independent of view filters or DONE display limits.
+Complete transfer uses the distinct versioned `kanbanTUI-board` JSON envelope, version 1. It is not the datastore schema. Imports reject non-integer versions and unknown envelope or task fields. Exports include all active and archived tasks independent of view filters or DONE display limits.
 
 Imports are parsed into the validated domain model before persistence. Imported tasks must satisfy the selected board's `limits.taskname`, and the final candidate board must satisfy TODO/WIP capacities.
 
@@ -184,7 +187,7 @@ Imports are parsed into the validated domain model before persistence. Imported 
 
 ## TUI safety
 
-`TaskExpectation` captures a detached, immutable representation of the complete persisted task record and its active/archive bucket. Comparisons include identity fields, content, metadata, state and ordering, not just `modified_at`. They use the existing persistence representation so unpersisted timestamp precision cannot cause false conflicts after the application's own writes. This is a state comparison, not a durable revision history: replacement with an exactly identical persisted task is semantically indistinguishable. No new datastore fields are introduced.
+`TaskExpectation` captures a detached, immutable representation of the complete task domain state and its active/archive bucket. Comparisons include identity fields, content, metadata, state and ordering, not just `modified_at`; no persistence record encoding leaks into this concurrency check. This is a state comparison, not a durable revision history: replacement with exactly identical task state is semantically indistinguishable.
 
 Edit/tag dialogs retain their drafts on conflict and require explicit Ctrl+R review before a new submission. The subsequent commit checks the refreshed expectation again. Missing or archived tasks remain blocked. Other selected-task shortcuts reject stale state and refresh the board; archive conflicts require reopening the picker. Relative reordering checks the selected task and resolves its current neighbor inside the transaction, so unrelated neighbor changes do not apply an obsolete target. Changes to unrelated task content do not invalidate a task expectation.
 

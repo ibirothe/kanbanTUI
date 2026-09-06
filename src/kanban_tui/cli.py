@@ -490,7 +490,7 @@ def import_command(path, mode):
         if mode_name != "replace":
             target, remapped = merge_boards(current, imported)
         result = OperationResult()
-        if target.to_mapping() == current.to_mapping():
+        if target == current:
             result.messages.append("Import produced no board changes.")
             return result
         validate_board_capacity(config, target)

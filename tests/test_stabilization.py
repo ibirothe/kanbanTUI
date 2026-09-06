@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+from kanban_tui.codec import decode_board, encode_board
 from kanban_tui.models import (
     Board,
     Task,
@@ -41,10 +42,10 @@ def test_legacy_done_record_uses_modified_time_as_completion_fallback():
         "deleted": {},
     }
 
-    board = Board.from_mapping(raw)
+    board = decode_board(raw)
 
     assert board.active[1].completed_at == T10
-    serialized = board.to_mapping()["data"][1]
+    serialized = encode_board(board)["data"][1]
     assert serialized[5]["completed_at"] == T10.isoformat()
 
 
@@ -64,7 +65,7 @@ def test_done_order_survives_mapping_and_export_round_trips_within_one_second():
         }
     )
 
-    mapped = Board.from_mapping(board.to_mapping())
+    mapped = decode_board(encode_board(board))
     exported = board_from_export(export_payload(board))
 
     assert [task.id for task in board.ordered_tasks(TaskState.DONE)] == [1, 2]

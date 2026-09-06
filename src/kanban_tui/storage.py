@@ -2,16 +2,15 @@ import os
 import sys
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import BinaryIO
 
 import click
 import yaml
 
 from .atomic import atomic_text_writer
+from .codec import DatastoreDocument, dump_datastore, load_datastore
 from .models import AppConfig, Board
 from .resources import resolve_board_paths
-
-UNDO_KEY = "_undo"
 
 
 class _LockUnavailable(Exception):
@@ -100,15 +99,19 @@ def datastore_lock(config: AppConfig):
         lock_file.close()
 
 
-def _read_raw_data(data_path: Path) -> Any:
+def _read_document(data_path: Path) -> DatastoreDocument:
     try:
         with data_path.open("r", encoding="utf-8") as stream:
             try:
-                return yaml.safe_load(stream)
+                return load_datastore(stream)
             except yaml.YAMLError as exc:
                 raise click.ClickException(
                     f"Datastore {data_path} contains invalid YAML: {exc}"
                 ) from exc
+            except UnicodeError:
+                raise
+            except ValueError as exc:
+                raise click.ClickException(f"Datastore {data_path}: {exc}") from exc
     except UnicodeError as exc:
         raise click.ClickException(
             f"Datastore {data_path} must use valid UTF-8 encoding."
@@ -121,10 +124,12 @@ def _read_raw_data(data_path: Path) -> Any:
         ) from exc
 
 
-def _atomic_write_mapping(data_path: Path, raw: dict[str, Any]) -> None:
+def _atomic_write_document(
+    data_path: Path, board: Board, previous: Board | None = None
+) -> None:
     try:
         with atomic_text_writer(data_path) as outfile:
-            yaml.safe_dump(raw, outfile, default_flow_style=False)
+            dump_datastore(outfile, board, previous)
     except (OSError, yaml.YAMLError) as exc:
         raise click.ClickException(
             f"Could not write datastore {data_path}: {exc}"
@@ -135,14 +140,10 @@ def read_data(config: AppConfig, *, initialize_missing: bool = False) -> Board:
     """Read the datastore without creating files or emitting user-facing output."""
     data_path = config.data_path
     try:
-        raw = _read_raw_data(data_path)
+        document = _read_document(data_path)
     except FileNotFoundError:
         return Board()
-
-    try:
-        return Board.from_mapping(raw)
-    except ValueError as exc:
-        raise click.ClickException(f"Datastore {data_path}: {exc}") from exc
+    return document.board
 
 
 def write_data(
@@ -152,28 +153,21 @@ def write_data(
     snapshot_previous: bool = False,
     previous: Board | None = None,
 ) -> None:
-    raw: dict[str, Any] = board.to_mapping()
     if previous is None and snapshot_previous:
         previous = read_data(config, initialize_missing=False)
-    if previous is not None:
-        raw[UNDO_KEY] = previous.to_mapping()
-    _atomic_write_mapping(config.data_path, raw)
+    _atomic_write_document(config.data_path, board, previous)
 
 
 def undo_last_change(config: AppConfig) -> Board:
     data_path = config.data_path
     try:
-        raw = _read_raw_data(data_path)
+        document = _read_document(data_path)
     except FileNotFoundError as exc:
         raise click.ClickException("Nothing to undo.") from exc
 
-    if not isinstance(raw, dict) or UNDO_KEY not in raw:
+    if document.previous is None:
         raise click.ClickException("Nothing to undo.")
 
-    try:
-        previous = Board.from_mapping(raw[UNDO_KEY])
-    except ValueError as exc:
-        raise click.ClickException(f"Undo snapshot is invalid: {exc}") from exc
-
-    _atomic_write_mapping(data_path, previous.to_mapping())
+    previous = document.previous
+    _atomic_write_document(data_path, previous)
     return previous
