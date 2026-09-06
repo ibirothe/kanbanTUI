@@ -4,6 +4,7 @@
 
 ### Fixes and quality
 
+- set Mono as the default theme for new and theme-less configs; refresh built-in dark palettes and make the selected TUI task high contrast;
 - reject stale TUI task mutations inside the writer transaction; retain conflicting edit/tag drafts for explicit review and choose reorder neighbors from current data;
 - reject collisions between config, datastore and lock paths, including symlink aliases, before config creation, updates or export; preserve active lock files during reconfiguration;
 - defer theme validation/discovery until invocation and allow recovery from missing or invalid selected themes;

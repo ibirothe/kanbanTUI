@@ -7,7 +7,7 @@ from pathlib import Path
 import click
 import yaml
 
-DEFAULT_THEME = "arch"
+DEFAULT_THEME = "mono"
 APP_DIR_NAME = "kanban-tui"
 THEME_NAME_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
 HEX_COLOR_PATTERN = re.compile(r"#[0-9a-fA-F]{6}")
@@ -17,6 +17,8 @@ COLOR_ROLES = (
     "text",
     "muted",
     "accent",
+    "selection",
+    "selection_text",
     "todo",
     "wip",
     "done",
@@ -40,6 +42,8 @@ class Theme:
     text: str
     muted: str
     accent: str
+    selection: str
+    selection_text: str
     todo: str
     wip: str
     done: str
@@ -61,28 +65,32 @@ class Theme:
 THEMES: dict[str, Theme] = {
     "arch": Theme(
         name="arch",
-        description="Arch blue on a dark terminal-friendly background",
-        background="#0f1419",
-        surface="#1d252c",
-        text="#d8dee9",
-        muted="#7f8c98",
-        accent="#1793d1",
-        todo="#1793d1",
-        wip="#f0c674",
-        done="#8ec07c",
-        priority_low="#6ca6c1",
-        priority_normal="#1793d1",
-        priority_high="#e5a84b",
-        priority_urgent="#ff5f56",
+        description="Tokyo Night-inspired Arch blue palette",
+        background="#1a1b26",
+        surface="#24283b",
+        text="#c0caf5",
+        muted="#565f89",
+        accent="#7aa2f7",
+        selection="#364a82",
+        selection_text="#ffffff",
+        todo="#7aa2f7",
+        wip="#e0af68",
+        done="#9ece6a",
+        priority_low="#7dcfff",
+        priority_normal="#7aa2f7",
+        priority_high="#e0af68",
+        priority_urgent="#f7768e",
     ),
     "nord": Theme(
         name="nord",
-        description="Muted arctic Nord palette",
+        description="Omarchy-inspired Nord palette",
         background="#2e3440",
         surface="#3b4252",
         text="#eceff4",
         muted="#81a1c1",
         accent="#88c0d0",
+        selection="#4c566a",
+        selection_text="#ffffff",
         todo="#88c0d0",
         wip="#ebcb8b",
         done="#a3be8c",
@@ -93,12 +101,14 @@ THEMES: dict[str, Theme] = {
     ),
     "gruvbox": Theme(
         name="gruvbox",
-        description="Warm retro Gruvbox-inspired palette",
+        description="Omarchy-inspired Gruvbox palette",
         background="#282828",
         surface="#3c3836",
         text="#ebdbb2",
         muted="#928374",
         accent="#d79921",
+        selection="#665c54",
+        selection_text="#fbf1c7",
         todo="#83a598",
         wip="#fabd2f",
         done="#b8bb26",
@@ -109,12 +119,14 @@ THEMES: dict[str, Theme] = {
     ),
     "dracula": Theme(
         name="dracula",
-        description="High-contrast Dracula-inspired palette",
+        description="Omarchy-inspired high-contrast purple palette",
         background="#282a36",
         surface="#44475a",
         text="#f8f8f2",
         muted="#6272a4",
         accent="#bd93f9",
+        selection="#705c9c",
+        selection_text="#ffffff",
         todo="#8be9fd",
         wip="#f1fa8c",
         done="#50fa7b",
@@ -125,18 +137,20 @@ THEMES: dict[str, Theme] = {
     ),
     "mono": Theme(
         name="mono",
-        description="Neutral grayscale theme",
-        background="#111111",
-        surface="#262626",
-        text="#eeeeee",
-        muted="#888888",
-        accent="#d0d0d0",
-        todo="#c8c8c8",
-        wip="#e0e0e0",
-        done="#a8a8a8",
-        priority_low="#888888",
-        priority_normal="#b0b0b0",
-        priority_high="#d0d0d0",
+        description="Omarchy Matte Black-inspired grayscale palette",
+        background="#0a0a0a",
+        surface="#1c1c1c",
+        text="#f5f5f5",
+        muted="#9a9a9a",
+        accent="#e5e5e5",
+        selection="#f5f5f5",
+        selection_text="#000000",
+        todo="#d4d4d4",
+        wip="#e5e5e5",
+        done="#bdbdbd",
+        priority_low="#a3a3a3",
+        priority_normal="#d4d4d4",
+        priority_high="#e5e5e5",
         priority_urgent="#ffffff",
     ),
 }

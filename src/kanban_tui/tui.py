@@ -495,8 +495,9 @@ class KanbanApp(App[None]):
                 child.styles.color = self.palette.text
             highlighted = view.highlighted_child
             if highlighted is not None:
-                highlighted.styles.background = self.palette.surface
-                highlighted.styles.color = self.palette.text
+                highlighted.styles.background = self.palette.selection
+                highlighted.styles.color = self.palette.selection_text
+                highlighted.styles.text_style = "bold"
 
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
         if not self._refreshing and event.list_view.has_focus and event.list_view.id:
