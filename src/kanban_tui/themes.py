@@ -7,7 +7,7 @@ from pathlib import Path
 import click
 import yaml
 
-DEFAULT_THEME = "mono"
+DEFAULT_THEME = "nord"
 APP_DIR_NAME = "kanban-tui"
 THEME_NAME_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
 HEX_COLOR_PATTERN = re.compile(r"#[0-9a-fA-F]{6}")
@@ -63,27 +63,9 @@ class Theme:
 
 
 THEMES: dict[str, Theme] = {
-    "arch": Theme(
-        name="arch",
-        description="Tokyo Night-inspired Arch blue palette",
-        background="#1a1b26",
-        surface="#24283b",
-        text="#c0caf5",
-        muted="#565f89",
-        accent="#7aa2f7",
-        selection="#364a82",
-        selection_text="#ffffff",
-        todo="#7aa2f7",
-        wip="#e0af68",
-        done="#9ece6a",
-        priority_low="#7dcfff",
-        priority_normal="#7aa2f7",
-        priority_high="#e0af68",
-        priority_urgent="#f7768e",
-    ),
     "nord": Theme(
         name="nord",
-        description="Omarchy-inspired Nord palette",
+        description="Muted arctic Nord palette",
         background="#2e3440",
         surface="#3b4252",
         text="#eceff4",
@@ -98,60 +80,6 @@ THEMES: dict[str, Theme] = {
         priority_normal="#81a1c1",
         priority_high="#d08770",
         priority_urgent="#bf616a",
-    ),
-    "gruvbox": Theme(
-        name="gruvbox",
-        description="Omarchy-inspired Gruvbox palette",
-        background="#282828",
-        surface="#3c3836",
-        text="#ebdbb2",
-        muted="#928374",
-        accent="#d79921",
-        selection="#665c54",
-        selection_text="#fbf1c7",
-        todo="#83a598",
-        wip="#fabd2f",
-        done="#b8bb26",
-        priority_low="#8ec07c",
-        priority_normal="#d3869b",
-        priority_high="#fe8019",
-        priority_urgent="#fb4934",
-    ),
-    "dracula": Theme(
-        name="dracula",
-        description="Omarchy-inspired high-contrast purple palette",
-        background="#282a36",
-        surface="#44475a",
-        text="#f8f8f2",
-        muted="#6272a4",
-        accent="#bd93f9",
-        selection="#705c9c",
-        selection_text="#ffffff",
-        todo="#8be9fd",
-        wip="#f1fa8c",
-        done="#50fa7b",
-        priority_low="#6272a4",
-        priority_normal="#bd93f9",
-        priority_high="#ffb86c",
-        priority_urgent="#ff5555",
-    ),
-    "mono": Theme(
-        name="mono",
-        description="Omarchy Matte Black-inspired grayscale palette",
-        background="#0a0a0a",
-        surface="#1c1c1c",
-        text="#f5f5f5",
-        muted="#9a9a9a",
-        accent="#e5e5e5",
-        selection="#f5f5f5",
-        selection_text="#000000",
-        todo="#d4d4d4",
-        wip="#e5e5e5",
-        done="#bdbdbd",
-        priority_low="#a3a3a3",
-        priority_normal="#d4d4d4",
-        priority_high="#e5e5e5",
-        priority_urgent="#ffffff",
     ),
 }
 

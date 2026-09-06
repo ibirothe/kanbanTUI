@@ -1,5 +1,5 @@
-description: Custom Arch-derived palette
-extends: arch
+description: Custom Nord-derived palette
+extends: nord
 colors:
   background: "#101820"
   surface: "#1b2733"

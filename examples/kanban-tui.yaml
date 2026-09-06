@@ -1,5 +1,5 @@
 data_path: ~/.local/share/kanban-tui/board.dat
-theme: arch
+theme: nord
 limits:
   todo: 10
   wip: 3

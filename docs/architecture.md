@@ -52,7 +52,7 @@ Read-only operations (`show`, `history`, export and normal TUI reads) do not acq
 
 `themes.py` owns the semantic visual palette shared by Rich and Textual. A theme supplies colors for background/surface/text, accent/muted content, TODO/WIP/DONE states and all four priority levels.
 
-Built-in themes are `arch`, `nord`, `gruvbox`, `dracula`, and `mono`; `mono` is the default. `AppConfig.theme` stores only the normalized theme name. Existing configuration files without a `theme` field remain valid and resolve to `mono`.
+Nord is the sole built-in theme and the default. `AppConfig.theme` stores only the normalized theme name. Existing configuration files without a `theme` field remain valid and resolve to `nord`.
 
 User-defined themes are discovered from:
 
@@ -68,7 +68,7 @@ $KANBAN_TUI_HOME/themes/<name>.yaml
 
 The filename stem is the theme name and must be a lowercase slug of at most 32 characters. Built-in names are reserved and cannot be shadowed by a user file.
 
-Custom YAML has three supported top-level fields: optional `description`, optional `extends`, and optional `colors`. `extends` defaults to `mono` and may reference built-in themes only. This deliberately prevents custom-to-custom inheritance cycles. `colors` may override any subset of the semantic roles; omitted roles are inherited from the built-in parent. Supplied colors are restricted to explicit `#RRGGBB` values so Rich and Textual receive the same deterministic color representation. The `selection` and `selection_text` roles specifically control the active TUI row.
+Custom YAML has three supported top-level fields: optional `description`, optional `extends`, and optional `colors`. `extends` defaults to `nord` and may reference the Nord built-in theme only. This deliberately prevents custom-to-custom inheritance cycles. `colors` may override any subset of the semantic roles; omitted roles are inherited from the built-in parent. Supplied colors are restricted to explicit `#RRGGBB` values so Rich and Textual receive the same deterministic color representation. The `selection` and `selection_text` roles specifically control the active TUI row.
 
 Theme loading is strict: invalid YAML, unsupported top-level keys, unknown color roles, invalid colors, invalid filenames, invalid parents, and built-in-name collisions raise an actionable `ThemeError`. The error type is both a validation error and a Click exception, so config validation can wrap it with config-path context while direct theme commands produce normal CLI errors rather than tracebacks.
 
