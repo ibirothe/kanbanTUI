@@ -4,7 +4,6 @@ import pytest
 
 from kanban_tui.models import Board, Task, TaskState, parse_timestamp
 
-
 STAMP = datetime(2026, 9, 4, 10, 0, tzinfo=timezone.utc)
 EARLIER = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
 

@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import Literal
 
 import click
 from textual.app import App, ComposeResult
@@ -20,8 +21,9 @@ from .services import (
     set_task_priority,
     set_task_tags,
 )
-from .storage import datastore_lock, read_data, undo_last_change, write_data
+from .storage import read_data
 from .themes import DEFAULT_THEME, Theme, get_theme
+from .transactions import mutate_board, undo_board
 
 
 def _app_theme(screen: ModalScreen) -> Theme:
@@ -71,7 +73,7 @@ class PromptScreen(ModalScreen[str | None]):
         prompt: str,
         *,
         initial: str = "",
-        input_type: str = "text",
+        input_type: Literal["integer", "number", "text"] = "text",
     ) -> None:
         super().__init__()
         self.prompt = prompt
@@ -140,7 +142,8 @@ class HelpScreen(ModalScreen[None]):
                 "p            cycle selected task priority\n"
                 "t            set selected task tags\n"
                 "d            archive selected task\n"
-                "r            restore archived task by ID\n"
+                "r            browse and restore archived tasks\n"
+                "Ctrl+R       refresh external changes\n"
                 "u            undo last board change\n"
                 "/            search text/tags/priority\n"
                 "c            clear filter\n"
@@ -161,6 +164,89 @@ class TaskListItem(ListItem):
     def __init__(self, task: Task, theme: Theme) -> None:
         super().__init__(Label(task_rich_text(task, theme)))
         self.task_id = task.id
+
+
+class ArchiveScreen(ModalScreen[tuple[Board, int] | None]):
+    """Search archived tasks and restore through the shared transaction boundary."""
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+    CSS = """
+    ArchiveScreen { align: center middle; }
+    #archive-dialog { width: 80%; max-width: 90; height: 75%; padding: 1 2; }
+    #archive-list { height: 1fr; }
+    #archive-status { height: auto; }
+    """
+
+    def __init__(self, config: AppConfig, board: Board) -> None:
+        super().__init__()
+        self.config = config
+        self.board = board
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="archive-dialog"):
+            yield Label("Restore archived task")
+            yield Input(placeholder="Search by ID or text", id="archive-search")
+            yield ListView(id="archive-list")
+            yield Static(
+                "Enter to restore · Tab to browse · Esc to cancel", id="archive-status"
+            )
+
+    async def on_mount(self) -> None:
+        _style_dialog(self, "#archive-dialog")
+        await self._filter("")
+        self.query_one("#archive-search", Input).focus()
+
+    async def _filter(self, query: str) -> None:
+        view = self.query_one("#archive-list", ListView)
+        await view.clear()
+        tasks = [
+            task
+            for task in sorted(self.board.deleted.values(), key=lambda task: task.id)
+            if query.casefold() in f"{task.id} {task.text}".casefold()
+        ]
+        await view.extend(
+            TaskListItem(task, get_theme(self.config.theme)) for task in tasks
+        )
+        if tasks:
+            view.index = 0
+        self.query_one("#archive-status", Static).update(
+            "Enter to restore · Tab to browse · Esc to cancel"
+            if tasks
+            else "No matching archived tasks."
+            if self.board.deleted
+            else "No archived tasks to restore."
+        )
+
+    async def on_input_changed(self, event: Input.Changed) -> None:
+        await self._filter(event.value.strip())
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self._restore_selected()
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        event.stop()
+        self._restore_selected()
+
+    def _restore_selected(self) -> None:
+        item = self.query_one("#archive-list", ListView).highlighted_child
+        if not isinstance(item, TaskListItem):
+            return
+        try:
+            board, result = mutate_board(
+                self.config,
+                lambda board: restore_tasks(self.config, board, [str(item.task_id)]),
+            )
+        except click.ClickException as exc:
+            self.query_one("#archive-status", Static).update(f"Error: {exc}")
+            return
+        if result.succeeded:
+            self.dismiss((board, item.task_id))
+        else:
+            self.query_one("#archive-status", Static).update(" ".join(result.messages))
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class KanbanApp(App[None]):
@@ -184,6 +270,7 @@ class KanbanApp(App[None]):
         Binding("t", "set_tags", "Tags"),
         Binding("d", "archive_task", "Archive"),
         Binding("r", "restore_task", "Restore"),
+        Binding("ctrl+r", "refresh", "Refresh"),
         Binding("u", "undo", "Undo"),
         Binding("/", "search", "Search"),
         Binding("c", "clear_search", "Clear filter", show=False),
@@ -245,9 +332,12 @@ class KanbanApp(App[None]):
         TaskState.DONE: "done-title",
     }
 
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(self, config: AppConfig, *, board_name: str = "default") -> None:
         super().__init__()
         self.config = config
+        self.board_name = board_name
+        self.title = f"kanbanTUI · {board_name}"
+        self._refreshing = False
         self.palette = get_theme(config.theme)
         self.board = Board()
         self.filter_text = ""
@@ -320,19 +410,20 @@ class KanbanApp(App[None]):
                 highlighted.styles.color = self.palette.text
 
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
-        if event.list_view.id:
+        if not self._refreshing and event.list_view.has_focus and event.list_view.id:
             self._last_list_id = event.list_view.id
         self._style_selection()
 
     def _set_status(self, message: str) -> None:
         self.query_one("#status", Static).update(message)
 
-    def _reload_board(self) -> None:
+    def _reload_board(self) -> bool:
         try:
             self.board = read_data(self.config, initialize_missing=False)
+            return True
         except click.ClickException as exc:
-            self.board = Board()
             self._set_status(f"Error: {exc}")
+            return False
 
     def _tasks_for_state(self, state: TaskState) -> list[Task]:
         return visible_tasks(
@@ -348,56 +439,67 @@ class KanbanApp(App[None]):
         focus_task_id: int | None = None,
         focus_state: TaskState | None = None,
     ) -> None:
-        first_available: tuple[str, ListView] | None = None
-        preferred_view: tuple[str, ListView] | None = None
-        explicit_focus_found = False
-
-        for state, view_id in self.STATE_VIEWS.items():
-            tasks = self._tasks_for_state(state)
-            view = self.query_one(f"#{view_id}", ListView)
-            await view.clear()
-            if tasks:
-                await view.extend(TaskListItem(task, self.palette) for task in tasks)
-                view.index = 0
-                if first_available is None:
-                    first_available = (view_id, view)
-                if view_id == self._last_list_id:
-                    preferred_view = (view_id, view)
-
-            title = self.query_one(f"#{self.STATE_TITLES[state]}", Static)
-            title.update(
-                column_label(
-                    self.config,
-                    self.board,
-                    state,
-                    visible_count=len(tasks),
-                )
-            )
-
-            if focus_task_id is not None and focus_state is state:
-                for index, task in enumerate(tasks):
-                    if task.id == focus_task_id:
-                        view.index = index
-                        view.focus()
-                        self._last_list_id = view_id
-                        explicit_focus_found = True
-                        break
-
-        if not explicit_focus_found:
-            selected = preferred_view or first_available
-            if selected is not None:
-                view_id, view = selected
-                if view.index is None:
+        previous_view = self._current_view()
+        previous_view_id = previous_view.id
+        previous_index = previous_view.index or 0
+        item = previous_view.highlighted_child
+        if focus_task_id is None and isinstance(item, TaskListItem):
+            focus_task_id = item.task_id
+        selected_task = (
+            self.board.active.get(focus_task_id) if focus_task_id is not None else None
+        )
+        if selected_task is not None:
+            focus_state = selected_task.state
+        populated: list[ListView] = []
+        selected: tuple[ListView, int] | None = None
+        self._refreshing = True
+        try:
+            for state, view_id in self.STATE_VIEWS.items():
+                tasks = self._tasks_for_state(state)
+                view = self.query_one(f"#{view_id}", ListView)
+                await view.clear()
+                if tasks:
+                    await view.extend(
+                        TaskListItem(task, self.palette) for task in tasks
+                    )
                     view.index = 0
+                    populated.append(view)
+                self.query_one(f"#{self.STATE_TITLES[state]}", Static).update(
+                    column_label(
+                        self.config, self.board, state, visible_count=len(tasks)
+                    )
+                )
+                if focus_state is state:
+                    for index, task in enumerate(tasks):
+                        if task.id == focus_task_id:
+                            selected = (view, index)
+                            break
+            if selected is None and populated:
+                view = next(
+                    (v for v in populated if v.id == previous_view_id), populated[0]
+                )
+                selected = (view, min(previous_index, len(view.children) - 1))
+            if selected is not None:
+                view, index = selected
+                view.index = index
                 view.focus()
-                self._last_list_id = view_id
-
+                self._last_list_id = view.id or "todo-list"
+            else:
+                self._last_list_id = "todo-list"
+                self._current_view().focus()
+        finally:
+            self._refreshing = False
         self._style_selection()
         self.sub_title = (
             f"filter: {self.filter_text}" if self.filter_text else "interactive board"
         )
 
     def _current_view(self) -> ListView:
+        if (
+            isinstance(self.focused, ListView)
+            and self.focused.id in self.STATE_VIEWS.values()
+        ):
+            return self.focused
         return self.query_one(f"#{self._last_list_id}", ListView)
 
     def _selected_task(self) -> Task | None:
@@ -416,11 +518,7 @@ class KanbanApp(App[None]):
         focus_state: TaskState | None = None,
     ) -> None:
         try:
-            with datastore_lock(self.config):
-                board = read_data(self.config)
-                result = operation(board)
-                if result.succeeded:
-                    write_data(self.config, board, snapshot_previous=True)
+            board, result = mutate_board(self.config, operation)
             self.board = board
         except click.ClickException as exc:
             self._set_status(f"Error: {exc}")
@@ -462,7 +560,8 @@ class KanbanApp(App[None]):
     async def _edit_prompt_result(self, task_id: int, value: str | None) -> None:
         if value is None:
             return
-        state = self.board.active.get(task_id).state if task_id in self.board.active else None
+        task = self.board.active.get(task_id)
+        state = task.state if task is not None else None
         await self._mutate(
             lambda board: edit_task(self.config, board, str(task_id), value),
             focus_task_id=task_id,
@@ -494,7 +593,8 @@ class KanbanApp(App[None]):
         if value is None:
             return
         tags = [part.strip() for part in value.split(",") if part.strip()]
-        state = self.board.active.get(task_id).state if task_id in self.board.active else None
+        task = self.board.active.get(task_id)
+        state = task.state if task is not None else None
         await self._mutate(
             lambda board: set_task_tags(board, str(task_id), tags),
             focus_task_id=task_id,
@@ -508,10 +608,23 @@ class KanbanApp(App[None]):
         await self._mutate(lambda board: delete_tasks(board, [str(task.id)]))
 
     def action_restore_task(self) -> None:
-        self.push_screen(
-            PromptScreen("Restore archived task ID", input_type="integer"),
-            self._restore_prompt_result,
-        )
+        try:
+            board = read_data(self.config)
+        except click.ClickException as exc:
+            self._set_status(f"Error: {exc}")
+            return
+        self.push_screen(ArchiveScreen(self.config, board), self._archive_result)
+
+    async def _archive_result(self, result: tuple[Board, int] | None) -> None:
+        if result is not None:
+            self.board, task_id = result
+            self._set_status(f"Restored #{task_id} to TODO.")
+            await self._refresh_board(focus_task_id=task_id, focus_state=TaskState.TODO)
+
+    async def action_refresh(self) -> None:
+        if self._reload_board():
+            await self._refresh_board()
+            self._set_status("Board refreshed.")
 
     async def _restore_prompt_result(self, value: str | None) -> None:
         if value is None or not value.strip():
@@ -526,8 +639,7 @@ class KanbanApp(App[None]):
 
     async def action_undo(self) -> None:
         try:
-            with datastore_lock(self.config):
-                self.board = undo_last_change(self.config)
+            self.board = undo_board(self.config)
         except click.ClickException as exc:
             self._set_status(str(exc))
             return
@@ -623,6 +735,6 @@ class KanbanApp(App[None]):
         self.push_screen(HelpScreen())
 
 
-def run_tui(config: AppConfig) -> None:
+def run_tui(config: AppConfig, *, board_name: str = "default") -> None:
     """Run the interactive kanbanTUI application."""
-    KanbanApp(config).run()
+    KanbanApp(config, board_name=board_name).run()

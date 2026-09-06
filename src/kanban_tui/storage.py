@@ -1,5 +1,5 @@
 import os
-import tempfile
+import sys
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -7,8 +7,8 @@ from typing import Any, BinaryIO
 import click
 import yaml
 
+from .atomic import atomic_text_writer
 from .models import AppConfig, Board
-
 
 UNDO_KEY = "_undo"
 
@@ -27,7 +27,7 @@ def _ensure_lock_byte(lock_file: BinaryIO) -> None:
 
 def _acquire_file_lock(lock_file: BinaryIO) -> None:
     lock_file.seek(0)
-    if os.name == "nt":
+    if sys.platform == "win32":
         import msvcrt
 
         try:
@@ -46,7 +46,7 @@ def _acquire_file_lock(lock_file: BinaryIO) -> None:
 
 def _release_file_lock(lock_file: BinaryIO) -> None:
     lock_file.seek(0)
-    if os.name == "nt":
+    if sys.platform == "win32":
         import msvcrt
 
         try:
@@ -84,7 +84,9 @@ def datastore_lock(config: AppConfig):
     except OSError as exc:
         if lock_file is not None:
             lock_file.close()
-        raise click.ClickException(f"Could not lock datastore {data_path}: {exc}") from exc
+        raise click.ClickException(
+            f"Could not lock datastore {data_path}: {exc}"
+        ) from exc
 
     try:
         yield
@@ -103,41 +105,26 @@ def _read_raw_data(data_path: Path) -> Any:
                 raise click.ClickException(
                     f"Datastore {data_path} contains invalid YAML: {exc}"
                 ) from exc
+    except UnicodeError as exc:
+        raise click.ClickException(
+            f"Datastore {data_path} must use valid UTF-8 encoding."
+        ) from exc
     except FileNotFoundError:
         raise
     except OSError as exc:
-        raise click.ClickException(f"Could not read datastore {data_path}: {exc}") from exc
+        raise click.ClickException(
+            f"Could not read datastore {data_path}: {exc}"
+        ) from exc
 
 
 def _atomic_write_mapping(data_path: Path, raw: dict[str, Any]) -> None:
-    directory = data_path.parent
-    temp_path: Path | None = None
-
     try:
-        directory.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=directory,
-            prefix=".kanban-tui-",
-            suffix=".tmp",
-            delete=False,
-        ) as outfile:
-            temp_path = Path(outfile.name)
+        with atomic_text_writer(data_path) as outfile:
             yaml.safe_dump(raw, outfile, default_flow_style=False)
-            outfile.flush()
-            os.fsync(outfile.fileno())
-
-        os.replace(temp_path, data_path)
-        temp_path = None
     except (OSError, yaml.YAMLError) as exc:
-        raise click.ClickException(f"Could not write datastore {data_path}: {exc}") from exc
-    finally:
-        if temp_path is not None:
-            try:
-                temp_path.unlink()
-            except OSError:
-                pass
+        raise click.ClickException(
+            f"Could not write datastore {data_path}: {exc}"
+        ) from exc
 
 
 def read_data(config: AppConfig, *, initialize_missing: bool = False) -> Board:
@@ -159,10 +146,12 @@ def write_data(
     board: Board,
     *,
     snapshot_previous: bool = False,
+    previous: Board | None = None,
 ) -> None:
     raw: dict[str, Any] = board.to_mapping()
-    if snapshot_previous:
+    if previous is None and snapshot_previous:
         previous = read_data(config, initialize_missing=False)
+    if previous is not None:
         raw[UNDO_KEY] = previous.to_mapping()
     _atomic_write_mapping(config.data_path, raw)
 

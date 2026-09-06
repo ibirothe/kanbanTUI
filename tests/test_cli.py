@@ -1,6 +1,5 @@
 import json
 from datetime import datetime
-from pathlib import Path
 
 from kanban_tui.cli import main
 from kanban_tui.storage import read_data
@@ -275,10 +274,10 @@ def test_move_before_requires_reference_id(runner, write_config):
 def test_show_reads_existing_data_without_writer_lock(runner, write_config):
     config = write_config()
     runner.invoke(main, ["add", "task"])
-    lock_path = Path(f"{config.data_path}.lock")
-    lock_path.mkdir()
+    from kanban_tui.storage import datastore_lock
 
-    result = runner.invoke(main, ["show"])
+    with datastore_lock(config):
+        result = runner.invoke(main, ["show"])
 
     assert result.exit_code == 0
     assert "task" in result.output

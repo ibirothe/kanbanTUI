@@ -1,12 +1,11 @@
 import copy
 import json
-import os
-import tempfile
 from pathlib import Path
 from typing import Any
 
 import click
 
+from .atomic import atomic_text_writer
 from .models import (
     AppConfig,
     Board,
@@ -16,7 +15,6 @@ from .models import (
     format_timestamp,
     parse_timestamp,
 )
-
 
 EXPORT_FORMAT = "kanbanTUI-board"
 EXPORT_VERSION = 1
@@ -30,7 +28,9 @@ def _task_payload(task: Task) -> dict[str, object]:
         "created_at": format_timestamp(task.created_at),
         "modified_at": format_timestamp(task.modified_at),
         "completed_at": (
-            format_timestamp(task.completed_at) if task.completed_at is not None else None
+            format_timestamp(task.completed_at)
+            if task.completed_at is not None
+            else None
         ),
         "position": task.position,
         "priority": task.priority.value if task.priority is not None else None,
@@ -111,7 +111,9 @@ def _parse_task(raw: Any, *, archived: bool) -> Task:
             completed_at=completed_at,
         )
     except ValueError as exc:
-        raise ValueError(f"task {task_id} has invalid metadata or timestamp: {exc}") from exc
+        raise ValueError(
+            f"task {task_id} has invalid metadata or timestamp: {exc}"
+        ) from exc
     return task
 
 
@@ -169,7 +171,9 @@ def validate_board_capacity(config: AppConfig, board: Board) -> None:
             )
 
 
-def _remap_imported_ids(current: Board, imported: Board) -> tuple[Board, dict[int, int]]:
+def _remap_imported_ids(
+    current: Board, imported: Board
+) -> tuple[Board, dict[int, int]]:
     """Copy an imported board and remap only IDs that collide with current history."""
     incoming = copy.deepcopy(imported)
     current_ids = set(current.active) | set(current.deleted)
@@ -225,8 +229,14 @@ def read_export(path: Path) -> Board:
     try:
         with path.open("r", encoding="utf-8") as infile:
             payload = json.load(infile)
+    except UnicodeError as exc:
+        raise click.ClickException(
+            f"Import file {path} must use valid UTF-8 encoding."
+        ) from exc
     except json.JSONDecodeError as exc:
-        raise click.ClickException(f"Import file {path} contains invalid JSON: {exc}") from exc
+        raise click.ClickException(
+            f"Import file {path} contains invalid JSON: {exc}"
+        ) from exc
     except OSError as exc:
         raise click.ClickException(f"Could not read import file {path}: {exc}") from exc
 
@@ -243,28 +253,13 @@ def write_export(path: Path, board: Board, *, overwrite: bool = False) -> Path:
             f"Export file {path} already exists. Use --force to overwrite it."
         )
 
-    temporary_path: Path | None = None
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            "w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as outfile:
-            temporary_path = Path(outfile.name)
+        with atomic_text_writer(path) as outfile:
             json.dump(export_payload(board), outfile, ensure_ascii=False, indent=2)
             outfile.write("\n")
-            outfile.flush()
-            os.fsync(outfile.fileno())
-        os.replace(temporary_path, path)
-        temporary_path = None
-    except OSError as exc:
-        raise click.ClickException(f"Could not write export file {path}: {exc}") from exc
-    finally:
-        if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(
+            f"Could not write export file {path}: {exc}"
+        ) from exc
 
     return path

@@ -14,6 +14,8 @@ Production code lives under `src/kanban_tui/`:
 - `config.py` — XDG/portable/legacy path resolution, named boards, YAML validation and atomic config writes.
 - `models.py` — typed domain model and persistence-schema invariants.
 - `services.py` — task mutations and workflow/capacity business rules.
+- `atomic.py` — shared same-directory temporary-file lifecycle and cleanup.
+- `transactions.py` — shared lock/read/mutate/write and undo application boundaries.
 - `storage.py` — side-effect-free reads, cross-process writer locking, atomic YAML writes and undo.
 - `themes.py` — semantic built-in palettes plus XDG/portable custom-theme discovery and YAML validation.
 - `transfer.py` — complete JSON export/import, validation and merge ID remapping.
@@ -26,7 +28,7 @@ Tests live under `tests/`. Focused suites cover models, services, storage, trans
 
 The root command is a normal `click.Group` with `invoke_without_command=True`. Running `kanban-tui` without a subcommand calls the normal board display path, while explicit commands use the same group and unique-prefix resolution.
 
-Click's built-in shell completion protocol is used for Bash, Zsh and Fish. Choice/path parameters inherit Click completion, `--board` adds dynamic completion from existing named board configs, and theme choices are backed by a dynamic sequence so newly created custom YAML themes are visible without reinstalling or re-importing the CLI module. Completion scripts are generated from the installed `kanban-tui` entry point and require no additional runtime package.
+Click's built-in shell completion protocol is used for Bash, Zsh and Fish. Choice/path parameters inherit Click completion, `--board` adds dynamic completion from existing named board configs, and theme arguments validate through a lazy Click parameter type. Filesystem discovery is deferred to invocation/completion, so invalid filenames cannot prevent basic CLI help or version output. Completion scripts are generated from the installed `kanban-tui` entry point and require no additional runtime package.
 
 ## Runtime flow
 
@@ -34,11 +36,13 @@ For a mutation:
 
 1. The CLI or TUI resolves the selected configuration.
 2. `config.py` validates it into `AppConfig`, including the selected built-in or custom color theme.
-3. `storage.py` acquires an exclusive OS-backed datastore writer lock.
+3. `transactions.py` owns the mutation boundary and acquires the datastore writer lock through `storage.py`.
 4. The YAML datastore is read into a validated `Board`. A missing datastore is represented as an empty board without creating files or printing output.
-5. `services.py` applies the operation and returns `OperationResult`.
+5. The transaction captures a detached pre-mutation board; `services.py` applies the operation and returns `OperationResult`.
 6. Only a successful semantic mutation writes the datastore.
-7. The previous complete board is stored as the single `_undo` snapshot in the same atomic replacement.
+7. The captured previous board is stored as the single `_undo` snapshot in the same atomic replacement, without rereading the datastore.
+
+Task commands, imports and TUI mutations share this transaction policy. Presentation, exit codes and selection remain in their adapters.
 
 Read-only operations (`show`, `history`, export and normal TUI reads) do not acquire the exclusive writer lock.
 
@@ -66,7 +70,7 @@ Custom YAML has three supported top-level fields: optional `description`, option
 
 Theme loading is strict: invalid YAML, unsupported top-level keys, unknown color roles, invalid colors, invalid filenames, invalid parents, and built-in-name collisions raise an actionable `ThemeError`. The error type is both a validation error and a Click exception, so config validation can wrap it with config-path context while direct theme commands produce normal CLI errors rather than tracebacks.
 
-Theme names exposed to Click use a dynamic `Sequence`. This keeps `theme set` and shell completion synchronized with files created after the CLI module was imported, which also makes headless tests deterministic.
+The theme parameter validates through `get_theme()` at command invocation and calls `theme_names()` for completion. It does not pass an eagerly materialized sequence to `click.Choice`, keeping selection and completion synchronized with themes created after CLI import.
 
 The selected theme remains per board/config. `theme list`, `theme current`, `theme set`, and `config set theme` all operate on the currently selected default, named or explicit config; custom theme definitions themselves are user-global within the active XDG/portable root.
 
@@ -133,7 +137,9 @@ This fallback is read-path compatibility rather than the layout for new installs
 
 Limits are strict non-negative integers (digit strings remain accepted for existing configs). Fractional numeric values are rejected rather than truncated. TODO/WIP may be configured as unlimited through the config command layer.
 
-Config writes use a sibling temporary file, flush, `fsync` and `os.replace()`.
+Config edits parse the current mapping, apply the edit and validate the full candidate before writing, allowing an invalid selected theme to be repaired.
+
+Config, datastore and export writers share `atomic_text_writer`: register a sibling temporary file immediately, serialize, flush, `fsync` and `os.replace()`, with best-effort cleanup that preserves the primary error. Each caller provides contextual error messages. Text readers also translate invalid UTF-8 into actionable errors.
 
 ## Persistence and locking
 
@@ -174,7 +180,9 @@ Imports are parsed into the validated domain model before persistence. Imported 
 
 The Textual TUI calls the same services and storage functions as the CLI. Validation, capacity rules, locking, undo, metadata normalization and ordering therefore have one implementation.
 
-Prompt input is routed through shared service validation, including restore IDs. Theme application is presentation-only and never changes board persistence or business-rule behavior.
+Prompt input is routed through shared service validation. A searchable archive picker restores tasks using the shared transaction boundary and keeps capacity errors in the dialog. Explicit Ctrl+R refreshes external changes without writing or acquiring a writer lock; failures retain the last valid display. Selection is restored by task ID after rebuilding columns, with a visible-task fallback. Only highlights in the focused list update selection tracking.
+
+The CLI passes a display-only board identity into the TUI; filtering does not replace that identity. Theme application is presentation-only and never changes board persistence or business-rule behavior.
 
 ## Arch installation model
 

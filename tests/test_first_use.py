@@ -32,7 +32,9 @@ def test_first_successful_cli_mutation_creates_datastore_and_can_be_undone(
     assert read_data(config) == Board()
 
 
-async def test_first_tui_mutation_creates_datastore_without_preinitialization(write_config):
+async def test_first_tui_mutation_creates_datastore_without_preinitialization(
+    write_config,
+):
     config = write_config()
     app = KanbanApp(config)
 

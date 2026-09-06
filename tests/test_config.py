@@ -57,7 +57,9 @@ def test_tilde_data_path_is_expanded(tmp_path):
 def test_data_path_cannot_point_to_config_file(tmp_path):
     config_path = tmp_path / "board.yaml"
 
-    with pytest.raises(click.ClickException, match="must not point to the config file itself"):
+    with pytest.raises(
+        click.ClickException, match="must not point to the config file itself"
+    ):
         validate_config({"data_path": str(config_path)}, config_path)
 
 
@@ -82,9 +84,7 @@ def test_xdg_paths_are_default_without_portable_home(monkeypatch, tmp_path):
     raw = yaml.safe_load(created.read_text(encoding="utf-8"))
 
     assert created == (xdg_config / "kanban-tui" / "config.yaml").resolve()
-    assert raw["data_path"] == str(
-        (xdg_data / "kanban-tui" / "board.dat").resolve()
-    )
+    assert raw["data_path"] == str((xdg_data / "kanban-tui" / "board.dat").resolve())
 
 
 def test_existing_legacy_default_config_is_discovered(monkeypatch, tmp_path):

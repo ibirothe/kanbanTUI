@@ -63,7 +63,7 @@ def todo_limit_reached(config: AppConfig, board: Board) -> bool:
 def _state_name(state: TaskState) -> str:
     if state is TaskState.IN_PROGRESS:
         return "IN PROGRESS"
-    return state.value.upper()
+    return str(state.value).upper()
 
 
 def _capacity_error(config: AppConfig, board: Board, state: TaskState) -> str:
@@ -73,7 +73,9 @@ def _capacity_error(config: AppConfig, board: Board, state: TaskState) -> str:
     return f"Error: {label} limit reached ({count}/{limit})."
 
 
-def _validate_task_text(config: AppConfig, raw_text: str) -> tuple[str | None, str | None]:
+def _validate_task_text(
+    config: AppConfig, raw_text: str
+) -> tuple[str | None, str | None]:
     text = raw_text.strip()
     if not text:
         return None, "Error: task text cannot be empty."
@@ -139,9 +141,21 @@ def _transition_task(
 
 
 def add_tasks(
-    config: AppConfig, board: Board, tasks: Iterable[str]
+    config: AppConfig,
+    board: Board,
+    tasks: Iterable[str],
+    *,
+    priority: TaskPriority | str | None = None,
+    tags: Iterable[str] = (),
 ) -> OperationResult:
     result = OperationResult()
+
+    try:
+        normalized_priority = TaskPriority(priority) if priority is not None else None
+        normalized_tags = tuple(sorted({normalize_tag(tag) for tag in tags}))
+    except ValueError as exc:
+        result.failure(f"Error: {exc}.")
+        return result
 
     for raw_text in tasks:
         text, error = _validate_task_text(config, raw_text)
@@ -163,6 +177,8 @@ def add_tasks(
             modified_at=now,
             created_at=now,
             position=board.next_position(TaskState.TODO),
+            priority=normalized_priority,
+            tags=normalized_tags,
         )
         result.success(f"Added #{task_id}: {text}")
 
@@ -363,7 +379,9 @@ def reorder_task(
 
     current_order = board.ordered_tasks(task.state)
     current_index = next(
-        index for index, candidate in enumerate(current_order) if candidate.id == task.id
+        index
+        for index, candidate in enumerate(current_order)
+        if candidate.id == task.id
     )
 
     if target == "top":
@@ -540,5 +558,7 @@ def update_task_tag(
     task.tags = tuple(sorted(tags))
     task.modified_at = timestamp()
     verb = "Added" if action == "add" else "Removed"
-    result.success(f"{verb} tag #{tag} {'to' if action == 'add' else 'from'} #{task.id}.")
+    result.success(
+        f"{verb} tag #{tag} {'to' if action == 'add' else 'from'} #{task.id}."
+    )
     return result

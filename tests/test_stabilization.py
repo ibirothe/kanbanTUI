@@ -10,7 +10,6 @@ from kanban_tui.services import (
 )
 from kanban_tui.transfer import board_from_export, export_payload
 
-
 T09 = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
 T10 = datetime(2026, 9, 4, 10, 0, tzinfo=timezone.utc)
 T11 = datetime(2026, 9, 4, 11, 0, tzinfo=timezone.utc)
@@ -38,7 +37,9 @@ def test_legacy_done_record_uses_modified_time_as_completion_fallback():
     assert serialized[5]["completed_at"] == T10.isoformat()
 
 
-def test_done_order_survives_later_text_priority_and_tag_changes(write_config, monkeypatch):
+def test_done_order_survives_later_text_priority_and_tag_changes(
+    write_config, monkeypatch
+):
     config = write_config()
     first = Task(1, TaskState.DONE, "first", T09, T09, completed_at=T09)
     second = Task(2, TaskState.DONE, "second", T10, T09, completed_at=T10)
@@ -54,7 +55,9 @@ def test_done_order_survives_later_text_priority_and_tag_changes(write_config, m
     assert [task.id for task in board.ordered_tasks(TaskState.DONE)] == [2, 1]
 
 
-def test_leaving_and_reentering_done_refreshes_completion_time(write_config, monkeypatch):
+def test_leaving_and_reentering_done_refreshes_completion_time(
+    write_config, monkeypatch
+):
     config = write_config()
     board = Board(
         active={1: Task(1, TaskState.DONE, "task", T10, T09, completed_at=T10)}

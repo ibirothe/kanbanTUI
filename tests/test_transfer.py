@@ -21,7 +21,6 @@ from kanban_tui.transfer import (
     write_export,
 )
 
-
 STAMP = datetime(2026, 9, 4, 10, 0, tzinfo=timezone.utc)
 EARLIER = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
 
@@ -46,8 +45,12 @@ def test_export_payload_contains_complete_board_not_display_subset():
     assert payload["version"] == EXPORT_VERSION
     assert {item["id"] for item in payload["active"]} == {1, 2, 3}
     assert [item["id"] for item in payload["archived"]] == [4]
-    assert all("created_at" in item and "modified_at" in item for item in payload["active"])
-    assert all("position" in item for item in [*payload["active"], *payload["archived"]])
+    assert all(
+        "created_at" in item and "modified_at" in item for item in payload["active"]
+    )
+    assert all(
+        "position" in item for item in [*payload["active"], *payload["archived"]]
+    )
 
 
 def test_export_round_trip_preserves_ids_states_text_and_timestamps():
@@ -72,7 +75,9 @@ def test_export_round_trip_preserves_ids_states_text_and_timestamps():
 
 def test_invalid_export_format_and_duplicate_ids_are_rejected():
     with pytest.raises(ValueError, match="unsupported export format"):
-        board_from_export({"format": "other", "version": 1, "active": [], "archived": []})
+        board_from_export(
+            {"format": "other", "version": 1, "active": [], "archived": []}
+        )
 
     payload = {
         "format": EXPORT_FORMAT,
@@ -287,7 +292,9 @@ def test_identical_replace_import_preserves_previous_undo_snapshot(
     assert read_data(config).active[1].text == "original"
 
 
-def test_empty_merge_import_preserves_previous_undo_snapshot(runner, write_config, tmp_path):
+def test_empty_merge_import_preserves_previous_undo_snapshot(
+    runner, write_config, tmp_path
+):
     config = write_config()
     runner.invoke(main, ["add", "original"])
     runner.invoke(main, ["edit", "1", "changed"])

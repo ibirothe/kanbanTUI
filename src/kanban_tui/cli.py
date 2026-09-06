@@ -28,8 +28,9 @@ from .services import (
     set_task_priority,
     update_task_tag,
 )
-from .storage import datastore_lock, read_data, undo_last_change, write_data
+from .storage import read_data
 from .themes import get_theme, theme_names
+from .transactions import mutate_board, undo_board
 from .transfer import (
     merge_boards,
     read_export,
@@ -37,6 +38,27 @@ from .transfer import (
     validate_imported_tasks,
     write_export,
 )
+
+
+class ThemeParamType(click.ParamType):
+    """Validate themes at invocation time, without filesystem work at import."""
+
+    name = "theme"
+
+    def convert(self, value, param, ctx):
+        try:
+            return get_theme(value).name
+        except ValueError as exc:
+            self.fail(str(exc), param, ctx)
+
+    def shell_complete(self, ctx, param, incomplete):
+        from click.shell_completion import CompletionItem
+
+        return [
+            CompletionItem(name)
+            for name in theme_names()
+            if name.casefold().startswith(incomplete.casefold())
+        ]
 
 
 class PrefixGroup(click.Group):
@@ -90,11 +112,6 @@ def _echo_messages(messages: list[str]) -> None:
         click.echo(message)
 
 
-def _persist_operation(config, board, result: OperationResult) -> None:
-    if result.succeeded:
-        write_data(config, board, snapshot_previous=True)
-
-
 def _complete_operation(result: OperationResult, config) -> None:
     _echo_messages(result.messages)
     if result.succeeded and config.repaint:
@@ -105,10 +122,9 @@ def _complete_operation(result: OperationResult, config) -> None:
 
 def _run_state_command(ids: tuple[str, ...], target_state: TaskState) -> None:
     config = _read_config()
-    with datastore_lock(config):
-        board = read_data(config)
-        result = move_tasks_to_state(config, board, ids, target_state)
-        _persist_operation(config, board, result)
+    _, result = mutate_board(
+        config, lambda board: move_tasks_to_state(config, board, ids, target_state)
+    )
     _complete_operation(result, config)
 
 
@@ -200,7 +216,9 @@ def board_list():
     entries.extend((name, get_board_config_path(name)) for name in list_named_boards())
 
     if not entries:
-        click.echo("No boards configured. Create one with: kanban-tui board create NAME")
+        click.echo(
+            "No boards configured. Create one with: kanban-tui board create NAME"
+        )
         return
 
     for name, path in entries:
@@ -256,7 +274,7 @@ def theme_commands():
 
 @theme_commands.command(name="list")
 def theme_list():
-    """List built-in themes and mark the selected one."""
+    """List available themes and mark the selected one."""
     current = _read_config().theme
     for name in theme_names():
         theme = get_theme(name)
@@ -271,9 +289,9 @@ def theme_current():
 
 
 @theme_commands.command(name="set")
-@click.argument("name", type=click.Choice(theme_names(), case_sensitive=False))
+@click.argument("name", type=ThemeParamType())
 def theme_set(name):
-    """Persist a built-in theme for the selected board."""
+    """Persist an available theme for the selected board."""
     normalized = get_theme(name).name
     path = set_config_value("theme", normalized, _selected_config_path())
     click.echo(f"Theme set to {normalized} in {path}")
@@ -281,14 +299,18 @@ def theme_set(name):
 
 @main.command()
 @click.argument("task_words", nargs=-1, required=True)
-def add(task_words):
+@click.option("--priority", type=click.Choice(["low", "normal", "high", "urgent"]))
+@click.option("--tag", "tags", multiple=True, help="Add a tag; may be repeated.")
+def add(task_words, priority, tags):
     """Add one task to TODO."""
     config = _read_config()
     task_text = " ".join(task_words)
-    with datastore_lock(config):
-        board = read_data(config)
-        result = add_tasks(config, board, [task_text])
-        _persist_operation(config, board, result)
+    _, result = mutate_board(
+        config,
+        lambda board: add_tasks(
+            config, board, [task_text], priority=priority, tags=tags
+        ),
+    )
     _complete_operation(result, config)
 
 
@@ -299,10 +321,9 @@ def edit(task_id, task_words):
     """Edit the text of an active task."""
     config = _read_config()
     task_text = " ".join(task_words)
-    with datastore_lock(config):
-        board = read_data(config)
-        result = edit_task(config, board, task_id, task_text)
-        _persist_operation(config, board, result)
+    _, result = mutate_board(
+        config, lambda board: edit_task(config, board, task_id, task_text)
+    )
     _complete_operation(result, config)
 
 
@@ -316,10 +337,9 @@ def priority(task_id, level):
     """Set or clear an active task priority."""
     config = _read_config()
     selected = None if level == "clear" else TaskPriority(level)
-    with datastore_lock(config):
-        board = read_data(config)
-        result = set_task_priority(board, task_id, selected)
-        _persist_operation(config, board, result)
+    _, result = mutate_board(
+        config, lambda board: set_task_priority(board, task_id, selected)
+    )
     _complete_operation(result, config)
 
 
@@ -353,10 +373,9 @@ def tag_clear(task_id):
 
 def _run_tag_command(task_id: str, action: str, tag: str | None = None) -> None:
     config = _read_config()
-    with datastore_lock(config):
-        board = read_data(config)
-        result = update_task_tag(board, task_id, action, tag)
-        _persist_operation(config, board, result)
+    _, result = mutate_board(
+        config, lambda board: update_task_tag(board, task_id, action, tag)
+    )
     _complete_operation(result, config)
 
 
@@ -365,10 +384,7 @@ def _run_tag_command(task_id: str, action: str, tag: str | None = None) -> None:
 def delete(ids):
     """Archive tasks."""
     config = _read_config()
-    with datastore_lock(config):
-        board = read_data(config)
-        result = delete_tasks(board, ids)
-        _persist_operation(config, board, result)
+    _, result = mutate_board(config, lambda board: delete_tasks(board, ids))
     _complete_operation(result, config)
 
 
@@ -377,10 +393,7 @@ def delete(ids):
 def restore(ids):
     """Restore archived tasks to TODO."""
     config = _read_config()
-    with datastore_lock(config):
-        board = read_data(config)
-        result = restore_tasks(config, board, ids)
-        _persist_operation(config, board, result)
+    _, result = mutate_board(config, lambda board: restore_tasks(config, board, ids))
     _complete_operation(result, config)
 
 
@@ -410,10 +423,7 @@ def todo(ids):
 def promote(ids):
     """Advance tasks by one state."""
     config = _read_config()
-    with datastore_lock(config):
-        board = read_data(config)
-        result = promote_tasks(config, board, ids)
-        _persist_operation(config, board, result)
+    _, result = mutate_board(config, lambda board: promote_tasks(config, board, ids))
     _complete_operation(result, config)
 
 
@@ -422,10 +432,7 @@ def promote(ids):
 def regress(ids):
     """Move tasks back by one state."""
     config = _read_config()
-    with datastore_lock(config):
-        board = read_data(config)
-        result = regress_tasks(config, board, ids)
-        _persist_operation(config, board, result)
+    _, result = mutate_board(config, lambda board: regress_tasks(config, board, ids))
     _complete_operation(result, config)
 
 
@@ -441,10 +448,9 @@ def move(task_id, target, reference_id):
         raise click.UsageError(f"{target} does not accept REFERENCE_ID")
 
     config = _read_config()
-    with datastore_lock(config):
-        board = read_data(config)
-        result = reorder_task(board, task_id, target, reference_id)
-        _persist_operation(config, board, result)
+    _, result = mutate_board(
+        config, lambda board: reorder_task(board, task_id, target, reference_id)
+    )
     _complete_operation(result, config)
 
 
@@ -479,26 +485,29 @@ def import_command(path, mode):
     mode_name = mode.lower()
     remapped: dict[int, int] = {}
 
-    with datastore_lock(config):
-        current = read_data(config, initialize_missing=False)
-        if mode_name == "replace":
-            target = imported
-        else:
+    def apply_import(current):
+        nonlocal remapped
+        target = imported
+        if mode_name != "replace":
             target, remapped = merge_boards(current, imported)
-
+        result = OperationResult()
         if target.to_mapping() == current.to_mapping():
-            click.echo("Import produced no board changes.")
-            return
-
+            result.messages.append("Import produced no board changes.")
+            return result
         validate_board_capacity(config, target)
-        write_data(config, target, snapshot_previous=True)
+        current.active, current.deleted = target.active, target.deleted
+        result.success(f"Imported board from {path.resolve()} ({mode_name}).")
+        if remapped:
+            mapping = ", ".join(
+                f"#{old_id}->#{new_id}" for old_id, new_id in sorted(remapped.items())
+            )
+            result.messages.append(f"Remapped task IDs: {mapping}")
+        return result
 
-    click.echo(f"Imported board from {path.resolve()} ({mode_name}).")
-    if remapped:
-        mapping = ", ".join(
-            f"#{old_id}->#{new_id}" for old_id, new_id in sorted(remapped.items())
-        )
-        click.echo(f"Remapped task IDs: {mapping}")
+    _, result = mutate_board(config, apply_import)
+    _echo_messages(result.messages)
+    if not result.succeeded:
+        return
     if config.repaint:
         display()
 
@@ -507,8 +516,7 @@ def import_command(path, mode):
 def undo():
     """Undo the last successful board mutation."""
     config = _read_config()
-    with datastore_lock(config):
-        undo_last_change(config)
+    undo_board(config)
     click.echo("Undid last board change.")
     if config.repaint:
         display()
@@ -604,7 +612,12 @@ def tui_command():
     config = _read_config()
     from .tui import run_tui
 
-    run_tui(config)
+    params = click.get_current_context().find_root().params
+    explicit = params.get("config_path")
+    identity = str(params.get("board_name") or "default")
+    if isinstance(explicit, Path):
+        identity = f"config: {explicit.name}"
+    run_tui(config, board_name=identity)
 
 
 @main.command()

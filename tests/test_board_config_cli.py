@@ -35,9 +35,9 @@ def test_named_boards_are_created_listed_selected_and_isolated(
     assert [task["text"] for task in show_named_json(runner, "work")["tasks"]] == [
         "work task"
     ]
-    assert [
-        task["text"] for task in show_named_json(runner, "personal")["tasks"]
-    ] == ["personal task"]
+    assert [task["text"] for task in show_named_json(runner, "personal")["tasks"]] == [
+        "personal task"
+    ]
 
     listing = runner.invoke(main, ["--board", "work", "board", "list"])
     assert listing.exit_code == 0
@@ -64,7 +64,7 @@ def test_named_board_validation_duplicate_and_selector_conflict(runner, tmp_path
     assert duplicate.exit_code != 0
     assert "already exists" in duplicate.output
     assert invalid.exit_code != 0
-    assert "Board names must" in invalid.output
+    assert "lowercase slugs" in invalid.output
     assert conflict.exit_code == 2
     assert "--config and --board cannot be used together" in conflict.output
 
@@ -79,9 +79,7 @@ def test_named_board_can_be_bootstrapped_with_configure(runner):
     assert raw["data_path"] == str(config_path.with_suffix(".dat"))
 
 
-def test_config_path_show_and_set_preserve_unrelated_values(
-    runner, isolated_app_home
-):
+def test_config_path_show_and_set_preserve_unrelated_values(runner, isolated_app_home):
     config_path = isolated_app_home / ".kanban-tui.yaml"
     config_path.write_text(
         yaml.safe_dump(
