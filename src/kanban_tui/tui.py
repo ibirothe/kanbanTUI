@@ -110,7 +110,100 @@ class PromptScreen(ModalScreen[str | None]):
         self.dismiss(None)
 
 
-class TaskPromptScreen(PromptScreen):
+class MutationPromptScreen(PromptScreen):
+    """Prompt that keeps its draft until a board mutation succeeds."""
+
+    def __init__(
+        self,
+        config: AppConfig,
+        prompt: str,
+        *,
+        initial: str = "",
+    ) -> None:
+        super().__init__(prompt, initial=initial)
+        self.config = config
+        self.current_board: Board | None = None
+        self.outcome: OperationResult | None = None
+        self._applying = False
+
+    def _apply(self, board: Board, value: str) -> OperationResult:
+        raise NotImplementedError
+
+    def _expected_tasks(self) -> tuple[TaskExpectation, ...]:
+        return ()
+
+    def _blocked_message(self) -> str | None:
+        return None
+
+    def _status(self, message: str, *, error: bool = True) -> None:
+        theme = _app_theme(self)
+        input_widget = self.query_one("#prompt-input", Input)
+        input_widget.styles.border = (
+            "round",
+            theme.priority_urgent if error else theme.accent,
+        )
+        self.query_one("#prompt-status", Static).update(Text(message))
+        input_widget.focus()
+
+    def _handle_conflict(self, exc: TaskConflict) -> None:
+        self.current_board = exc.board
+        self._status(f"{exc} Draft kept; Esc to cancel.")
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        event.prevent_default()
+        if self._applying:
+            return
+        blocked = self._blocked_message()
+        if blocked is not None:
+            self._status(blocked)
+            return
+
+        input_widget = self.query_one("#prompt-input", Input)
+        self._applying = True
+        input_widget.disabled = True
+        conflict: TaskConflict | None = None
+        error: click.ClickException | None = None
+        try:
+            board, result = mutate_board(
+                self.config,
+                lambda board: self._apply(board, event.value),
+                expected_tasks=self._expected_tasks(),
+            )
+        except TaskConflict as exc:
+            conflict = exc
+        except click.ClickException as exc:
+            error = exc
+        finally:
+            input_widget.disabled = False
+            self._applying = False
+
+        if conflict is not None:
+            self._handle_conflict(conflict)
+            return
+        if error is not None:
+            self._status(f"Error: {error}")
+            return
+
+        self.current_board = board
+        if result.succeeded:
+            self.outcome = result
+            self.dismiss(event.value)
+        else:
+            self._status(" ".join(result.messages))
+
+
+class AddTaskPromptScreen(MutationPromptScreen):
+    """Add one task without discarding rejected input."""
+
+    def __init__(self, config: AppConfig) -> None:
+        super().__init__(config, "Add task")
+
+    def _apply(self, board: Board, value: str) -> OperationResult:
+        return add_tasks(self.config, board, [value])
+
+
+class TaskPromptScreen(MutationPromptScreen):
     """Edit a captured task, retaining the draft until a conflict is reviewed."""
 
     BINDINGS = [Binding("ctrl+r", "review_current", "Review current task")]
@@ -119,19 +212,13 @@ class TaskPromptScreen(PromptScreen):
         self, config: AppConfig, task: Task, field: Literal["text", "tags"]
     ) -> None:
         super().__init__(
+            config,
             "Edit task" if field == "text" else "Set tags (comma-separated)",
             initial=task.text if field == "text" else ", ".join(task.tags),
         )
-        self.config = config
         self.field = field
         self.expected = TaskExpectation.capture(task)
         self.conflicted = False
-        self.current_board: Board | None = None
-        self.outcome: OperationResult | None = None
-
-    def _status(self, message: str) -> None:
-        self.query_one("#prompt-status", Static).update(Text(message))
-        self.query_one(Input).focus()
 
     def _apply(self, board: Board, value: str) -> OperationResult:
         task_id = str(self.expected.task_id)
@@ -140,32 +227,18 @@ class TaskPromptScreen(PromptScreen):
         tags = [part.strip() for part in value.split(",") if part.strip()]
         return set_task_tags(board, task_id, tags)
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        event.stop()
-        event.prevent_default()
+    def _expected_tasks(self) -> tuple[TaskExpectation, ...]:
+        return (self.expected,)
+
+    def _blocked_message(self) -> str | None:
         if self.conflicted:
-            self._status("Conflict: press Ctrl+R to review the current task first.")
-            return
-        try:
-            board, result = mutate_board(
-                self.config,
-                lambda board: self._apply(board, event.value),
-                expected_tasks=(self.expected,),
-            )
-        except TaskConflict as exc:
-            self.current_board = exc.board
-            self.conflicted = True
-            self._status(f"{exc} Your draft is kept. Ctrl+R to review · Esc to cancel.")
-            return
-        except click.ClickException as exc:
-            self._status(f"Error: {exc}")
-            return
-        self.current_board = board
-        if result.succeeded:
-            self.outcome = result
-            self.dismiss(event.value)
-        else:
-            self._status(" ".join(result.messages))
+            return "Conflict: press Ctrl+R to review the current task first."
+        return None
+
+    def _handle_conflict(self, exc: TaskConflict) -> None:
+        self.current_board = exc.board
+        self.conflicted = True
+        self._status(f"{exc} Your draft is kept. Ctrl+R to review · Esc to cancel.")
 
     def action_review_current(self) -> None:
         try:
@@ -185,7 +258,8 @@ class TaskPromptScreen(PromptScreen):
         self._status(
             f"Current #{task.id}: {task.text}\n"
             f"State: {task.state.value} · Priority: {priority} · Tags: {tags}\n"
-            f"Your draft is unchanged. Enter to apply your {self.field} · Esc to cancel."
+            f"Your draft is unchanged. Enter to apply your {self.field} · Esc to cancel.",
+            error=False,
         )
 
 
@@ -639,12 +713,11 @@ class KanbanApp(App[None]):
         self._current_view().action_cursor_up()
 
     def action_add_task(self) -> None:
-        self.push_screen(PromptScreen("Add task"), self._add_prompt_result)
-
-    async def _add_prompt_result(self, value: str | None) -> None:
-        if value is None:
-            return
-        await self._mutate(lambda board: add_tasks(self.config, board, [value]))
+        screen = AddTaskPromptScreen(self.config)
+        self.push_screen(
+            screen,
+            lambda value: self._mutation_prompt_result(screen, value),
+        )
 
     def action_edit_task(self) -> None:
         task = self._selected_task()
@@ -654,14 +727,20 @@ class KanbanApp(App[None]):
 
     def _open_task_prompt(self, task: Task, field: Literal["text", "tags"]) -> None:
         screen = TaskPromptScreen(self.config, task, field)
-        self.push_screen(screen, lambda value: self._task_prompt_result(screen, value))
+        self.push_screen(
+            screen,
+            lambda value: self._mutation_prompt_result(screen, value, task.id),
+        )
 
-    async def _task_prompt_result(
-        self, screen: TaskPromptScreen, value: str | None
+    async def _mutation_prompt_result(
+        self,
+        screen: MutationPromptScreen,
+        value: str | None,
+        focus_task_id: int | None = None,
     ) -> None:
         if screen.current_board is not None:
             self.board = screen.current_board
-            await self._refresh_board(focus_task_id=screen.expected.task_id)
+            await self._refresh_board(focus_task_id=focus_task_id)
         if value is not None and screen.outcome is not None:
             self._set_status(" ".join(screen.outcome.messages))
 

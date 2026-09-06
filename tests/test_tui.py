@@ -1,4 +1,4 @@
-from textual.widgets import ListView
+from textual.widgets import Input, ListView
 
 from kanban_tui.models import Board, TaskState
 from kanban_tui.services import add_tasks
@@ -44,7 +44,10 @@ async def test_tui_add_and_search_refresh_the_live_board(write_config):
     async with app.run_test() as pilot:
         await pilot.pause()
 
-        await app._add_prompt_result("gamma")
+        await pilot.press("a")
+        app.screen.query_one(Input).value = "gamma"
+        await pilot.press("enter")
+        await pilot.pause()
         assert [task.text for task in app.board.ordered_tasks(TaskState.TODO)] == [
             "alpha",
             "beta search target",

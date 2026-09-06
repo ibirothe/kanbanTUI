@@ -1,3 +1,5 @@
+from textual.widgets import Input
+
 from kanban_tui.cli import main
 from kanban_tui.models import Board
 from kanban_tui.storage import read_data
@@ -42,7 +44,9 @@ async def test_first_tui_mutation_creates_datastore_without_preinitialization(
         await pilot.pause()
         assert not config.data_path.exists()
 
-        await app._add_prompt_result("first tui task")
+        await pilot.press("a")
+        app.screen.query_one(Input).value = "first tui task"
+        await pilot.press("enter")
         await pilot.pause()
 
         assert config.data_path.exists()
