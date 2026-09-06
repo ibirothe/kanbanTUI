@@ -23,6 +23,7 @@ def test_config_defaults_are_normalized(tmp_path):
     assert config.limits.taskname == 40
     assert config.limits.done == 10
     assert config.repaint is False
+    assert config.theme == "mono"
 
 
 def test_absolute_data_path_is_preserved(tmp_path):
@@ -85,6 +86,7 @@ def test_xdg_paths_are_default_without_portable_home(monkeypatch, tmp_path):
 
     assert created == (xdg_config / "kanban-tui" / "config.yaml").resolve()
     assert raw["data_path"] == str((xdg_data / "kanban-tui" / "board.dat").resolve())
+    assert raw["theme"] == "mono"
 
 
 def test_existing_legacy_default_config_is_discovered(monkeypatch, tmp_path):

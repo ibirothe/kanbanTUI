@@ -4,12 +4,14 @@ from pathlib import Path
 import click
 import pytest
 import yaml
+from textual.color import Color
 from textual.widgets import Static
 
 from kanban_tui.cli import main
 from kanban_tui.config import get_board_config_path, get_config_path, validate_config
 from kanban_tui.models import AppConfig, Board, Task, TaskPriority, TaskState
 from kanban_tui.rendering import render_board, task_rich_text
+from kanban_tui.storage import datastore_lock, write_data
 from kanban_tui.themes import (
     DEFAULT_THEME,
     get_theme,
@@ -30,7 +32,7 @@ def write_user_theme(name: str, payload: dict) -> Path:
 
 
 def test_builtin_theme_catalog_is_stable():
-    assert DEFAULT_THEME == "arch"
+    assert DEFAULT_THEME == "mono"
     assert theme_names() == ("arch", "nord", "gruvbox", "dracula", "mono")
 
 
@@ -69,14 +71,14 @@ def test_custom_theme_is_discovered_and_inherits_builtin_palette():
     assert theme.priority_urgent == nord.priority_urgent
 
 
-def test_custom_theme_defaults_to_arch_when_extends_is_omitted():
+def test_custom_theme_defaults_to_mono_when_extends_is_omitted():
     write_user_theme("minimal", {"colors": {"done": "#010203"}})
 
     theme = get_theme("minimal")
 
     assert theme.done == "#010203"
-    assert theme.background == get_theme("arch").background
-    assert theme.description == "Custom theme based on arch"
+    assert theme.background == get_theme("mono").background
+    assert theme.description == "Custom theme based on mono"
 
 
 def test_custom_theme_path_uses_portable_home(isolated_app_home):
@@ -116,13 +118,13 @@ def test_custom_theme_rejects_non_builtin_parent():
         get_theme("child")
 
 
-def test_config_without_theme_defaults_to_arch(tmp_path):
+def test_config_without_theme_defaults_to_mono(tmp_path):
     config = validate_config(
         {"data_path": str(tmp_path / "board.dat")},
         tmp_path / "config.yaml",
     )
 
-    assert config.theme == "arch"
+    assert config.theme == "mono"
 
 
 def test_invalid_config_theme_is_rejected(tmp_path):
@@ -153,9 +155,9 @@ def test_theme_cli_lists_sets_and_reports_selected_theme(runner, write_config):
     config_show = runner.invoke(main, ["config", "show"])
 
     assert current.exit_code == 0
-    assert current.output == "arch\n"
+    assert current.output == "mono\n"
     assert listing.exit_code == 0
-    assert "* arch\t" in listing.output
+    assert "* mono\t" in listing.output
     assert "  nord\t" in listing.output
     assert changed.exit_code == 0
     assert "Theme set to nord" in changed.output
@@ -223,7 +225,7 @@ def test_named_boards_keep_independent_theme_selection(runner):
         get_board_config_path("personal").read_text(encoding="utf-8")
     )
     assert work["theme"] == "dracula"
-    assert personal["theme"] == "arch"
+    assert personal["theme"] == "mono"
 
 
 def test_named_board_can_select_custom_theme(runner):
@@ -291,6 +293,26 @@ async def test_tui_applies_selected_palette(write_config):
         assert app.palette.name == "gruvbox"
         assert app.query_one("#todo-title", Static).styles.color is not None
         assert app.query_one("#status", Static).styles.background is not None
+
+
+@pytest.mark.parametrize("theme_name", ["arch", "nord", "gruvbox", "dracula", "mono"])
+async def test_tui_selected_task_uses_high_contrast_palette_colors(
+    write_config, theme_name
+):
+    config = write_config()
+    config.theme = theme_name
+    board = Board(active={1: Task(1, TaskState.TODO, "Selected", STAMP, STAMP)})
+    with datastore_lock(config):
+        write_data(config, board)
+    app = KanbanApp(config)
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        item = app.query_one("#todo-list").highlighted_child
+        assert item is not None
+        assert item.styles.background == Color.parse(app.palette.selection)
+        assert item.styles.color == Color.parse(app.palette.selection_text)
+        assert item.styles.text_style.bold
 
 
 async def test_tui_applies_custom_palette(write_config):

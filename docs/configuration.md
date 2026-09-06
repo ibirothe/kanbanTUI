@@ -31,7 +31,7 @@ Existing installations are not abandoned: when no XDG config exists, an existing
 Supported settings:
 
 - `data_path`: datastore path. Relative paths are resolved relative to the configuration file directory.
-- `theme`: color theme; default `arch`.
+- `theme`: color theme; default `mono`.
 - `limits.todo`: optional TODO capacity.
 - `limits.wip`: optional in-progress capacity.
 - `limits.done`: maximum completed tasks displayed; default `10`.
