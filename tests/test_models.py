@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from kanban_tui.codec import decode_board, encode_board
 from kanban_tui.models import Board, Task, TaskState, parse_timestamp
 
 STAMP = datetime(2026, 9, 4, 10, 0, tzinfo=timezone.utc)
@@ -21,8 +22,8 @@ def test_legacy_timestamps_and_records_are_normalized():
         "deleted": {},
     }
 
-    board = Board.from_mapping(raw)
-    serialized = board.to_mapping()
+    board = decode_board(raw)
+    serialized = encode_board(board)
 
     assert board.active[3].modified_at.tzinfo is not None
     assert board.active[3].created_at.tzinfo is not None
@@ -34,6 +35,7 @@ def test_legacy_timestamps_and_records_are_normalized():
 
 def test_iso_timestamp_and_position_round_trip_is_stable():
     raw = {
+        "schema_version": 1,
         "data": {
             1: [
                 "todo",
@@ -54,7 +56,7 @@ def test_iso_timestamp_and_position_round_trip_is_stable():
         },
     }
 
-    board = Board.from_mapping(raw)
+    board = decode_board(raw)
 
     assert board.active[1] == Task(
         id=1,
@@ -65,7 +67,7 @@ def test_iso_timestamp_and_position_round_trip_is_stable():
         position=4,
     )
     assert board.deleted[2].state is TaskState.DELETED
-    assert board.to_mapping() == raw
+    assert encode_board(board) == raw
 
 
 def test_active_manual_order_uses_position_then_id():
@@ -82,7 +84,7 @@ def test_active_manual_order_uses_position_then_id():
 
 def test_invalid_task_state_is_rejected():
     with pytest.raises(ValueError, match="unsupported state"):
-        Board.from_mapping(
+        decode_board(
             {
                 "data": {
                     1: [
@@ -99,7 +101,7 @@ def test_invalid_task_state_is_rejected():
 
 def test_invalid_timestamp_is_rejected():
     with pytest.raises(ValueError, match="invalid timestamp"):
-        Board.from_mapping(
+        decode_board(
             {
                 "data": {1: ["todo", "task", "not-a-time", "also-not-a-time"]},
                 "deleted": {},
@@ -126,7 +128,7 @@ def test_non_done_task_cannot_have_completion_timestamp():
 
 def test_invalid_position_is_rejected():
     with pytest.raises(ValueError, match="invalid position"):
-        Board.from_mapping(
+        decode_board(
             {
                 "data": {
                     1: [
@@ -144,7 +146,7 @@ def test_invalid_position_is_rejected():
 
 def test_fractional_position_is_rejected_instead_of_truncated():
     with pytest.raises(ValueError, match="invalid position"):
-        Board.from_mapping(
+        decode_board(
             {
                 "data": {
                     1: [
@@ -162,7 +164,7 @@ def test_fractional_position_is_rejected_instead_of_truncated():
 
 def test_datastore_task_keys_must_be_positive_integers():
     with pytest.raises(ValueError, match="active task ids must be positive integers"):
-        Board.from_mapping(
+        decode_board(
             {
                 "data": {
                     "1": [
@@ -212,4 +214,4 @@ def test_active_and_deleted_ids_cannot_overlap():
     }
 
     with pytest.raises(ValueError, match="both active and deleted: 1"):
-        Board.from_mapping(raw)
+        decode_board(raw)

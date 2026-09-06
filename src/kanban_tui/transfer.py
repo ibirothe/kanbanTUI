@@ -18,6 +18,27 @@ from .models import (
 
 EXPORT_FORMAT = "kanbanTUI-board"
 EXPORT_VERSION = 1
+_EXPORT_KEYS = {"format", "version", "active", "archived"}
+_TASK_KEYS = {
+    "id",
+    "state",
+    "text",
+    "created_at",
+    "modified_at",
+    "completed_at",
+    "position",
+    "priority",
+    "tags",
+}
+
+
+def _reject_unknown_fields(
+    raw: dict[Any, Any], allowed: set[str], context: str
+) -> None:
+    unknown = [key for key in raw if key not in allowed]
+    if unknown:
+        names = ", ".join(repr(key) for key in unknown)
+        raise ValueError(f"{context} contains unknown fields: {names}")
 
 
 def _task_payload(task: Task) -> dict[str, object]:
@@ -56,6 +77,7 @@ def export_payload(board: Board) -> dict[str, object]:
 def _parse_task(raw: Any, *, archived: bool) -> Task:
     if not isinstance(raw, dict):
         raise ValueError("task entries must be objects")
+    _reject_unknown_fields(raw, _TASK_KEYS, "task entry")
 
     task_id = raw.get("id")
     if isinstance(task_id, bool) or not isinstance(task_id, int) or task_id < 1:
@@ -120,10 +142,14 @@ def _parse_task(raw: Any, *, archived: bool) -> Task:
 def board_from_export(payload: Any) -> Board:
     if not isinstance(payload, dict):
         raise ValueError("export must contain a JSON object")
+    _reject_unknown_fields(payload, _EXPORT_KEYS, "export")
     if payload.get("format") != EXPORT_FORMAT:
         raise ValueError(f"unsupported export format: {payload.get('format')!r}")
-    if payload.get("version") != EXPORT_VERSION:
-        raise ValueError(f"unsupported export version: {payload.get('version')!r}")
+    version = payload.get("version")
+    if isinstance(version, bool) or not isinstance(version, int):
+        raise ValueError("export version must be an integer")
+    if version != EXPORT_VERSION:
+        raise ValueError(f"unsupported export version: {version!r}")
 
     raw_active = payload.get("active")
     raw_archived = payload.get("archived")

@@ -4,6 +4,7 @@ import click
 import pytest
 import yaml
 
+from kanban_tui.cli import main
 from kanban_tui.models import Board, Task, TaskState
 from kanban_tui.storage import datastore_lock, read_data, write_data
 
@@ -52,6 +53,7 @@ def test_write_data_round_trip_uses_iso_timestamps(write_config):
 
     raw = yaml.safe_load(config.data_path.read_text(encoding="utf-8"))
     assert loaded == board
+    assert raw["schema_version"] == 1
     assert raw["data"][1][2] == "2026-09-04T10:00:00+00:00"
     assert raw["data"][1][3] == "2026-09-04T09:00:00+00:00"
 
@@ -122,6 +124,48 @@ def test_older_timestamp_format_is_deserialized(write_config):
     assert board.active[1].state is TaskState.TODO
     assert board.active[1].text == "task"
     assert board.active[1].modified_at.tzinfo is not None
+
+
+def test_reading_legacy_datastore_does_not_write_migration(write_config):
+    config = write_config()
+    legacy = """data: {}
+deleted: {}
+"""
+    config.data_path.write_text(legacy, encoding="utf-8")
+
+    assert read_data(config) == Board()
+    assert config.data_path.read_text(encoding="utf-8") == legacy
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        """schema_version: 99
+data: {}
+deleted: {}
+""",
+        """schema_version: 1
+data:
+  1: [todo, first, '2026-09-06T12:00:00+00:00', '2026-09-06T11:00:00+00:00']
+  1: [todo, second, '2026-09-06T12:00:00+00:00', '2026-09-06T11:00:00+00:00']
+deleted: {}
+""",
+    ],
+)
+def test_invalid_schema_blocks_mutation_and_preserves_bytes(
+    runner, write_config, source
+):
+    config = write_config()
+    config.data_path.write_text(source, encoding="utf-8")
+    original = config.data_path.read_bytes()
+
+    mutation = runner.invoke(main, ["add", "new"])
+    undo = runner.invoke(main, ["undo"])
+
+    assert mutation.exit_code != 0
+    assert undo.exit_code != 0
+    assert "schema_version" in mutation.output or "duplicate key" in mutation.output
+    assert config.data_path.read_bytes() == original
 
 
 def test_invalid_datastore_record_is_rejected(write_config):

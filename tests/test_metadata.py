@@ -6,6 +6,7 @@ import pytest
 from textual.widgets import Input
 
 from kanban_tui.cli import main
+from kanban_tui.codec import decode_board, encode_board
 from kanban_tui.models import (
     AppConfig,
     Board,
@@ -56,11 +57,11 @@ def test_legacy_five_field_record_remains_metadata_free():
         "deleted": {},
     }
 
-    board = Board.from_mapping(raw)
+    board = decode_board(raw)
 
     assert board.active[1].priority is None
     assert board.active[1].tags == ()
-    assert board.to_mapping() == raw
+    assert encode_board(board) == {"schema_version": 1, **raw}
 
 
 def test_metadata_round_trip_uses_optional_sixth_record_field():
@@ -75,8 +76,8 @@ def test_metadata_round_trip_uses_optional_sixth_record_field():
     )
     board = Board(active={1: original})
 
-    raw = board.to_mapping()
-    restored = Board.from_mapping(raw)
+    raw = encode_board(board)
+    restored = decode_board(raw)
 
     assert raw["data"][1][5] == {"priority": "high", "tags": ["backend", "bug"]}
     assert restored.active[1].priority is TaskPriority.HIGH
