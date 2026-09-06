@@ -1,4 +1,4 @@
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -33,6 +33,13 @@ class OperationResult:
 
 def timestamp() -> datetime:
     return datetime.now().astimezone()
+
+
+Clock = Callable[[], datetime]
+
+
+def _now(clock: Clock | None) -> datetime:
+    return (clock or timestamp)()
 
 
 def _count_state(board: Board, state: TaskState) -> int:
@@ -118,6 +125,7 @@ def _transition_task(
     board: Board,
     task: Task,
     target_state: TaskState,
+    clock: Clock | None,
 ) -> str | None:
     if task.state is target_state:
         return f"Error: task #{task.id} is already {_state_name(target_state)}."
@@ -125,7 +133,7 @@ def _transition_task(
         return _capacity_error(config, board, target_state)
 
     previous_state = task.state
-    now = timestamp()
+    now = _now(clock)
     if target_state in {TaskState.TODO, TaskState.IN_PROGRESS}:
         _place_at_bottom(board, task, target_state)
         if previous_state is TaskState.DONE:
@@ -147,6 +155,7 @@ def add_tasks(
     *,
     priority: TaskPriority | str | None = None,
     tags: Iterable[str] = (),
+    clock: Clock | None = None,
 ) -> OperationResult:
     result = OperationResult()
 
@@ -169,7 +178,7 @@ def add_tasks(
             continue
 
         task_id = board.next_task_id()
-        now = timestamp()
+        now = _now(clock)
         board.active[task_id] = Task(
             id=task_id,
             state=TaskState.TODO,
@@ -186,7 +195,12 @@ def add_tasks(
 
 
 def edit_task(
-    config: AppConfig, board: Board, task_id: str, raw_text: str
+    config: AppConfig,
+    board: Board,
+    task_id: str,
+    raw_text: str,
+    *,
+    clock: Clock | None = None,
 ) -> OperationResult:
     result = OperationResult()
     numeric_id, error = _parse_task_id(task_id)
@@ -215,12 +229,14 @@ def edit_task(
         return result
 
     task.text = text
-    task.modified_at = timestamp()
+    task.modified_at = _now(clock)
     result.success(f"Updated #{numeric_id}: {text}")
     return result
 
 
-def delete_tasks(board: Board, ids: Iterable[str]) -> OperationResult:
+def delete_tasks(
+    board: Board, ids: Iterable[str], *, clock: Clock | None = None
+) -> OperationResult:
     result = OperationResult()
     for task_id in ids:
         task, error = _active_task(board, task_id)
@@ -231,7 +247,7 @@ def delete_tasks(board: Board, ids: Iterable[str]) -> OperationResult:
 
         previous_state = task.state
         task.state = TaskState.DELETED
-        task.modified_at = timestamp()
+        task.modified_at = _now(clock)
         board.deleted[task.id] = task
         board.active.pop(task.id)
         board.normalize_positions(previous_state)
@@ -241,7 +257,11 @@ def delete_tasks(board: Board, ids: Iterable[str]) -> OperationResult:
 
 
 def restore_tasks(
-    config: AppConfig, board: Board, ids: Iterable[str]
+    config: AppConfig,
+    board: Board,
+    ids: Iterable[str],
+    *,
+    clock: Clock | None = None,
 ) -> OperationResult:
     result = OperationResult()
     for task_id in ids:
@@ -266,7 +286,7 @@ def restore_tasks(
 
         _place_at_bottom(board, task, TaskState.TODO)
         task.completed_at = None
-        task.modified_at = timestamp()
+        task.modified_at = _now(clock)
         board.active[numeric_id] = task
         board.deleted.pop(numeric_id)
         result.success(f"Restored #{numeric_id} to TODO.")
@@ -279,6 +299,8 @@ def move_tasks_to_state(
     board: Board,
     ids: Iterable[str],
     target_state: TaskState,
+    *,
+    clock: Clock | None = None,
 ) -> OperationResult:
     """Move active tasks directly to an explicit target state."""
     result = OperationResult()
@@ -289,7 +311,7 @@ def move_tasks_to_state(
             continue
         assert task is not None
 
-        error = _transition_task(config, board, task, target_state)
+        error = _transition_task(config, board, task, target_state, clock)
         if error is not None:
             result.failure(error)
             continue
@@ -304,7 +326,11 @@ def move_tasks_to_state(
 
 
 def promote_tasks(
-    config: AppConfig, board: Board, ids: Iterable[str]
+    config: AppConfig,
+    board: Board,
+    ids: Iterable[str],
+    *,
+    clock: Clock | None = None,
 ) -> OperationResult:
     result = OperationResult()
     for task_id in ids:
@@ -324,7 +350,7 @@ def promote_tasks(
             result.failure(f"Error: task #{task.id} is already DONE.")
             continue
 
-        error = _transition_task(config, board, task, target_state)
+        error = _transition_task(config, board, task, target_state, clock)
         if error is not None:
             result.failure(error)
         else:
@@ -334,7 +360,11 @@ def promote_tasks(
 
 
 def regress_tasks(
-    config: AppConfig, board: Board, ids: Iterable[str]
+    config: AppConfig,
+    board: Board,
+    ids: Iterable[str],
+    *,
+    clock: Clock | None = None,
 ) -> OperationResult:
     result = OperationResult()
     for task_id in ids:
@@ -354,7 +384,7 @@ def regress_tasks(
             result.failure(f"Error: task #{task.id} is already TODO.")
             continue
 
-        error = _transition_task(config, board, task, target_state)
+        error = _transition_task(config, board, task, target_state, clock)
         if error is not None:
             result.failure(error)
         else:
@@ -368,6 +398,8 @@ def reorder_task(
     task_id: str,
     target: str,
     reference_id: str | None = None,
+    *,
+    clock: Clock | None = None,
 ) -> OperationResult:
     """Reorder one TODO or IN PROGRESS task within its current state."""
     result = OperationResult()
@@ -446,12 +478,18 @@ def reorder_task(
     ordered.insert(insert_at, task)
     for position, candidate in enumerate(ordered, start=1):
         candidate.position = position
-    task.modified_at = timestamp()
+    task.modified_at = _now(clock)
     result.success(success_message)
     return result
 
 
-def reorder_task_relative(board: Board, task_id: str, delta: int) -> OperationResult:
+def reorder_task_relative(
+    board: Board,
+    task_id: str,
+    delta: int,
+    *,
+    clock: Clock | None = None,
+) -> OperationResult:
     """Choose the adjacent task from the current transaction's board."""
     result = OperationResult()
     task, error = _active_task(board, task_id)
@@ -476,6 +514,7 @@ def reorder_task_relative(board: Board, task_id: str, delta: int) -> OperationRe
         task_id,
         "before" if delta < 0 else "after",
         str(ordered[neighbor_index].id),
+        clock=clock,
     )
 
 
@@ -483,6 +522,8 @@ def set_task_priority(
     board: Board,
     task_id: str,
     priority: TaskPriority | str | None,
+    *,
+    clock: Clock | None = None,
 ) -> OperationResult:
     """Set or clear one active task priority without changing manual order."""
     result = OperationResult()
@@ -510,7 +551,7 @@ def set_task_priority(
         return result
 
     task.priority = normalized
-    task.modified_at = timestamp()
+    task.modified_at = _now(clock)
     if normalized is None:
         result.success(f"Cleared priority for #{task.id}.")
     else:
@@ -518,7 +559,13 @@ def set_task_priority(
     return result
 
 
-def set_task_tags(board: Board, task_id: str, tags: Iterable[str]) -> OperationResult:
+def set_task_tags(
+    board: Board,
+    task_id: str,
+    tags: Iterable[str],
+    *,
+    clock: Clock | None = None,
+) -> OperationResult:
     """Replace the complete tag set for one active task."""
     result = OperationResult()
     task, error = _active_task(board, task_id)
@@ -538,7 +585,7 @@ def set_task_tags(board: Board, task_id: str, tags: Iterable[str]) -> OperationR
         return result
 
     task.tags = normalized
-    task.modified_at = timestamp()
+    task.modified_at = _now(clock)
     if normalized:
         result.success(f"Set #{task.id} tags: {', '.join(normalized)}.")
     else:
@@ -551,6 +598,8 @@ def update_task_tag(
     task_id: str,
     action: str,
     raw_tag: str | None = None,
+    *,
+    clock: Clock | None = None,
 ) -> OperationResult:
     """Add, remove, or clear tags for one active task."""
     result = OperationResult()
@@ -561,7 +610,7 @@ def update_task_tag(
     assert task is not None
 
     if action == "clear":
-        return set_task_tags(board, task_id, [])
+        return set_task_tags(board, task_id, [], clock=clock)
     if raw_tag is None:
         result.failure(f"Error: tag {action} requires a tag value.")
         return result
@@ -588,7 +637,7 @@ def update_task_tag(
         return result
 
     task.tags = tuple(sorted(tags))
-    task.modified_at = timestamp()
+    task.modified_at = _now(clock)
     verb = "Added" if action == "add" else "Removed"
     result.success(
         f"{verb} tag #{tag} {'to' if action == 'add' else 'from'} #{task.id}."

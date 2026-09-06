@@ -97,9 +97,11 @@ A `Task` has a positive integer ID, a supported state, non-empty text, timezone-
 
 TODO and IN PROGRESS use persistent numeric `position` ordering. Reordering normalizes positions to consecutive values. Already-satisfied reorder requests are semantic no-ops and therefore do not alter timestamps, persistence or undo history.
 
-DONE is ordered by `completed_at` descending. Entering DONE sets the timestamp; leaving DONE clears it; re-entering DONE creates a new completion time. Later text, priority or tag edits update `modified_at` without changing completion order.
+DONE is ordered by `completed_at` descending, with descending task ID as the deterministic tie-breaker. Entering DONE sets the timestamp; leaving DONE clears it; re-entering DONE creates a new completion time. Later text, priority or tag edits update `modified_at` without changing completion order.
 
 Legacy DONE records without `completed_at` use their existing `modified_at` as the migration fallback and persist an explicit completion timestamp on their next write.
+
+Current timestamps retain their available ISO 8601 microsecond precision across datastore, JSON export/import, display JSON and undo snapshots. Historical timestamps that contain only seconds remain valid and are emitted without invented fractional values. Time-dependent service operations accept an optional clock callable for deterministic integration and testing.
 
 ## XDG configuration and board selection
 
