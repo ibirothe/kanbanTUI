@@ -2,6 +2,7 @@ from collections.abc import Callable
 from typing import Literal
 
 import click
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -16,14 +17,14 @@ from .services import (
     delete_tasks,
     edit_task,
     move_tasks_to_state,
-    reorder_task,
+    reorder_task_relative,
     restore_tasks,
     set_task_priority,
     set_task_tags,
 )
 from .storage import read_data
 from .themes import DEFAULT_THEME, Theme, get_theme
-from .transactions import mutate_board, undo_board
+from .transactions import TaskConflict, TaskExpectation, mutate_board, undo_board
 
 
 def _app_theme(screen: ModalScreen) -> Theme:
@@ -90,6 +91,7 @@ class PromptScreen(ModalScreen[str | None]):
                 id="prompt-input",
             )
             yield Static("Enter to confirm · Esc to cancel", id="prompt-hint")
+            yield Static("", id="prompt-status")
 
     def on_mount(self) -> None:
         _style_dialog(self, "#prompt-dialog")
@@ -106,6 +108,85 @@ class PromptScreen(ModalScreen[str | None]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+
+class TaskPromptScreen(PromptScreen):
+    """Edit a captured task, retaining the draft until a conflict is reviewed."""
+
+    BINDINGS = [Binding("ctrl+r", "review_current", "Review current task")]
+
+    def __init__(
+        self, config: AppConfig, task: Task, field: Literal["text", "tags"]
+    ) -> None:
+        super().__init__(
+            "Edit task" if field == "text" else "Set tags (comma-separated)",
+            initial=task.text if field == "text" else ", ".join(task.tags),
+        )
+        self.config = config
+        self.field = field
+        self.expected = TaskExpectation.capture(task)
+        self.conflicted = False
+        self.current_board: Board | None = None
+        self.outcome: OperationResult | None = None
+
+    def _status(self, message: str) -> None:
+        self.query_one("#prompt-status", Static).update(Text(message))
+        self.query_one(Input).focus()
+
+    def _apply(self, board: Board, value: str) -> OperationResult:
+        task_id = str(self.expected.task_id)
+        if self.field == "text":
+            return edit_task(self.config, board, task_id, value)
+        tags = [part.strip() for part in value.split(",") if part.strip()]
+        return set_task_tags(board, task_id, tags)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        event.prevent_default()
+        if self.conflicted:
+            self._status("Conflict: press Ctrl+R to review the current task first.")
+            return
+        try:
+            board, result = mutate_board(
+                self.config,
+                lambda board: self._apply(board, event.value),
+                expected_tasks=(self.expected,),
+            )
+        except TaskConflict as exc:
+            self.current_board = exc.board
+            self.conflicted = True
+            self._status(f"{exc} Your draft is kept. Ctrl+R to review · Esc to cancel.")
+            return
+        except click.ClickException as exc:
+            self._status(f"Error: {exc}")
+            return
+        self.current_board = board
+        if result.succeeded:
+            self.outcome = result
+            self.dismiss(event.value)
+        else:
+            self._status(" ".join(result.messages))
+
+    def action_review_current(self) -> None:
+        try:
+            self.current_board = read_data(self.config)
+        except click.ClickException as exc:
+            self._status(f"Error: {exc}")
+            return
+        task = self.current_board.active.get(self.expected.task_id)
+        if task is None:
+            self.conflicted = True
+            self._status("Task is archived or missing. Draft kept; Esc to cancel.")
+            return
+        self.expected = TaskExpectation.capture(task)
+        self.conflicted = False
+        priority = task.priority.value if task.priority else "none"
+        tags = ", ".join(task.tags) or "none"
+        self._status(
+            f"Current #{task.id}: {task.text}\n"
+            f"State: {task.state.value} · Priority: {priority} · Tags: {tags}\n"
+            f"Your draft is unchanged. Enter to apply your {self.field} · Esc to cancel."
+        )
 
 
 class HelpScreen(ModalScreen[None]):
@@ -236,7 +317,15 @@ class ArchiveScreen(ModalScreen[tuple[Board, int] | None]):
             board, result = mutate_board(
                 self.config,
                 lambda board: restore_tasks(self.config, board, [str(item.task_id)]),
+                expected_tasks=(
+                    TaskExpectation.capture(self.board.deleted[item.task_id]),
+                ),
             )
+        except TaskConflict as exc:
+            self.query_one("#archive-status", Static).update(
+                Text(f"{exc} Close and reopen the archive to review current tasks.")
+            )
+            return
         except click.ClickException as exc:
             self.query_one("#archive-status", Static).update(f"Error: {exc}")
             return
@@ -516,10 +605,18 @@ class KanbanApp(App[None]):
         *,
         focus_task_id: int | None = None,
         focus_state: TaskState | None = None,
+        expected_tasks: tuple[TaskExpectation, ...] = (),
     ) -> None:
         try:
-            board, result = mutate_board(self.config, operation)
+            board, result = mutate_board(
+                self.config, operation, expected_tasks=expected_tasks
+            )
             self.board = board
+        except TaskConflict as exc:
+            self.board = exc.board
+            await self._refresh_board(focus_task_id=focus_task_id)
+            self._set_status(f"{exc} Board refreshed; review and retry.")
+            return
         except click.ClickException as exc:
             self._set_status(f"Error: {exc}")
             return
@@ -552,21 +649,20 @@ class KanbanApp(App[None]):
         task = self._selected_task()
         if task is None:
             return
-        self.push_screen(
-            PromptScreen("Edit task", initial=task.text),
-            lambda value: self._edit_prompt_result(task.id, value),
-        )
+        self._open_task_prompt(task, "text")
 
-    async def _edit_prompt_result(self, task_id: int, value: str | None) -> None:
-        if value is None:
-            return
-        task = self.board.active.get(task_id)
-        state = task.state if task is not None else None
-        await self._mutate(
-            lambda board: edit_task(self.config, board, str(task_id), value),
-            focus_task_id=task_id,
-            focus_state=state,
-        )
+    def _open_task_prompt(self, task: Task, field: Literal["text", "tags"]) -> None:
+        screen = TaskPromptScreen(self.config, task, field)
+        self.push_screen(screen, lambda value: self._task_prompt_result(screen, value))
+
+    async def _task_prompt_result(
+        self, screen: TaskPromptScreen, value: str | None
+    ) -> None:
+        if screen.current_board is not None:
+            self.board = screen.current_board
+            await self._refresh_board(focus_task_id=screen.expected.task_id)
+        if value is not None and screen.outcome is not None:
+            self._set_status(" ".join(screen.outcome.messages))
 
     async def action_cycle_priority(self) -> None:
         task = self._selected_task()
@@ -578,34 +674,23 @@ class KanbanApp(App[None]):
             lambda board: set_task_priority(board, str(task.id), next_priority),
             focus_task_id=task.id,
             focus_state=task.state,
+            expected_tasks=(TaskExpectation.capture(task),),
         )
 
     def action_set_tags(self) -> None:
         task = self._selected_task()
         if task is None:
             return
-        self.push_screen(
-            PromptScreen("Set tags (comma-separated)", initial=", ".join(task.tags)),
-            lambda value: self._tags_prompt_result(task.id, value),
-        )
-
-    async def _tags_prompt_result(self, task_id: int, value: str | None) -> None:
-        if value is None:
-            return
-        tags = [part.strip() for part in value.split(",") if part.strip()]
-        task = self.board.active.get(task_id)
-        state = task.state if task is not None else None
-        await self._mutate(
-            lambda board: set_task_tags(board, str(task_id), tags),
-            focus_task_id=task_id,
-            focus_state=state,
-        )
+        self._open_task_prompt(task, "tags")
 
     async def action_archive_task(self) -> None:
         task = self._selected_task()
         if task is None:
             return
-        await self._mutate(lambda board: delete_tasks(board, [str(task.id)]))
+        await self._mutate(
+            lambda board: delete_tasks(board, [str(task.id)]),
+            expected_tasks=(TaskExpectation.capture(task),),
+        )
 
     def action_restore_task(self) -> None:
         try:
@@ -687,6 +772,7 @@ class KanbanApp(App[None]):
             ),
             focus_task_id=task.id,
             focus_state=target_state,
+            expected_tasks=(TaskExpectation.capture(task),),
         )
 
     async def action_move_left(self) -> None:
@@ -699,30 +785,11 @@ class KanbanApp(App[None]):
         task = self._selected_task()
         if task is None:
             return
-        if task.state is TaskState.DONE:
-            self._set_status("Completed tasks are ordered by completion time.")
-            return
-
-        ordered = self.board.ordered_tasks(task.state)
-        index = next(
-            index for index, candidate in enumerate(ordered) if candidate.id == task.id
-        )
-        neighbor_index = index + delta
-        if neighbor_index < 0 or neighbor_index >= len(ordered):
-            self._set_status("Task is already at the edge of the column.")
-            return
-
-        neighbor = ordered[neighbor_index]
-        target = "before" if delta < 0 else "after"
         await self._mutate(
-            lambda board: reorder_task(
-                board,
-                str(task.id),
-                target,
-                str(neighbor.id),
-            ),
+            lambda board: reorder_task_relative(board, str(task.id), delta),
             focus_task_id=task.id,
             focus_state=task.state,
+            expected_tasks=(TaskExpectation.capture(task),),
         )
 
     async def action_priority_up(self) -> None:

@@ -39,6 +39,7 @@ For a mutation:
 2. `config.py` validates it into `AppConfig`, including the selected built-in or custom color theme.
 3. `transactions.py` owns the mutation boundary and acquires the datastore writer lock through `storage.py`.
 4. The YAML datastore is read into a validated `Board`. A missing datastore is represented as an empty board without creating files or printing output.
+   Snapshot-dependent TUI commands then compare their task expectations against this current board while still holding the writer lock. A conflict returns the current board through `TaskConflict` before the operation or any write occurs.
 5. The transaction captures a detached pre-mutation board; `services.py` applies the operation and returns `OperationResult`.
 6. Only a successful semantic mutation writes the datastore.
 7. The captured previous board is stored as the single `_undo` snapshot in the same atomic replacement, without rereading the datastore.
@@ -180,6 +181,10 @@ Imports are parsed into the validated domain model before persistence. Imported 
 `replace` preserves imported IDs. `merge` preserves non-conflicting IDs and deterministically remaps collisions against active or archived history. Export refuses destinations that resolve to the selected board's config file, datastore or datastore lock file.
 
 ## TUI safety
+
+`TaskExpectation` captures a detached, immutable representation of the complete persisted task record and its active/archive bucket. Comparisons include identity fields, content, metadata, state and ordering, not just `modified_at`. They use the existing persistence representation so unpersisted timestamp precision cannot cause false conflicts after the application's own writes. This is a state comparison, not a durable revision history: replacement with an exactly identical persisted task is semantically indistinguishable. No new datastore fields are introduced.
+
+Edit/tag dialogs retain their drafts on conflict and require explicit Ctrl+R review before a new submission. The subsequent commit checks the refreshed expectation again. Missing or archived tasks remain blocked. Other selected-task shortcuts reject stale state and refresh the board; archive conflicts require reopening the picker. Relative reordering checks the selected task and resolves its current neighbor inside the transaction, so unrelated neighbor changes do not apply an obsolete target. Changes to unrelated task content do not invalidate a task expectation.
 
 The Textual TUI calls the same services and storage functions as the CLI. Validation, capacity rules, locking, undo, metadata normalization and ordering therefore have one implementation.
 

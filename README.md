@@ -111,6 +111,13 @@ Keyboard controls:
 The header identifies the selected board and keeps that identity visible during search.
 Refresh preserves the selected task and filter where possible; read errors retain the last valid board.
 
+Task actions check the selected task against the current datastore before writing.
+If another terminal changes it, the action is rejected and the board refreshes.
+Edit/tag dialogs keep your draft on conflict: press `Ctrl+R` inside the dialog to
+review the current task, then `Enter` to apply your draft or `Esc` to cancel.
+Archived or missing tasks cannot be edited. Changes to other tasks do not block
+your edit. If an archive selection changes, close and reopen the picker to review it.
+
 The CLI remains available for scripting and one-shot operations.
 
 ## Usage

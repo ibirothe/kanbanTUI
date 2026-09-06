@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from textual.widgets import Input
 
 from kanban_tui.cli import main
 from kanban_tui.models import (
@@ -186,7 +187,10 @@ async def test_tui_cycles_priority_and_sets_tags(write_config):
     async with app.run_test() as pilot:
         await pilot.pause()
         await app.action_cycle_priority()
-        await app._tags_prompt_result(1, "Backend, ui")
+        await pilot.press("t")
+        app.screen.query_one(Input).value = "Backend, ui"
+        await pilot.press("enter")
+        await pilot.pause()
 
         assert app.board.active[1].priority is TaskPriority.LOW
         assert app.board.active[1].tags == ("backend", "ui")

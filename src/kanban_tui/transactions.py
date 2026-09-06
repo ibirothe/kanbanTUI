@@ -1,18 +1,59 @@
 """Application transaction boundaries shared by terminal adapters."""
 
+import json
 from collections.abc import Callable
 from copy import deepcopy
+from dataclasses import dataclass
 
-from .models import AppConfig, Board
+from .models import AppConfig, Board, Task, TaskState
 from .services import OperationResult
 from .storage import datastore_lock, read_data, undo_last_change, write_data
 
 
+@dataclass(frozen=True)
+class TaskExpectation:
+    """Detached comparison of the complete task state represented on disk."""
+
+    task_id: int
+    archived: bool
+    record: str
+
+    @classmethod
+    def capture(cls, task: Task) -> "TaskExpectation":
+        return cls(
+            task.id,
+            task.state is TaskState.DELETED,
+            json.dumps(task.to_record(), sort_keys=True),
+        )
+
+    def matches(self, board: Board) -> bool:
+        tasks = board.deleted if self.archived else board.active
+        task = tasks.get(self.task_id)
+        return task is not None and self == self.capture(task)
+
+
+class TaskConflict(Exception):
+    """A snapshot-dependent command no longer matches the current task."""
+
+    def __init__(self, board: Board, task_id: int) -> None:
+        self.board = board
+        self.task_id = task_id
+        super().__init__(
+            f"Conflict: task #{task_id} changed or is no longer available."
+        )
+
+
 def mutate_board(
-    config: AppConfig, operation: Callable[[Board], OperationResult]
+    config: AppConfig,
+    operation: Callable[[Board], OperationResult],
+    *,
+    expected_tasks: tuple[TaskExpectation, ...] = (),
 ) -> tuple[Board, OperationResult]:
     with datastore_lock(config):
         board = read_data(config)
+        for expected in expected_tasks:
+            if not expected.matches(board):
+                raise TaskConflict(board, expected.task_id)
         previous = deepcopy(board)
         result = operation(board)
         if result.succeeded and board.to_mapping() != previous.to_mapping():
