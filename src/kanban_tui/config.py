@@ -8,6 +8,7 @@ import yaml
 
 from .atomic import atomic_text_writer
 from .models import AppConfig, Limits
+from .resources import resolve_board_paths
 from .themes import DEFAULT_THEME, get_theme
 
 APP_DIR_NAME = "kanban-tui"
@@ -150,10 +151,12 @@ def validate_config(config, config_path: Path) -> AppConfig:
 
     resolved_config_path = config_path.expanduser().resolve()
     data_path = _resolve_data_path(raw_data_path, resolved_config_path)
-    if data_path == resolved_config_path:
+    try:
+        resolve_board_paths(data_path, resolved_config_path)
+    except ValueError as exc:
         raise click.ClickException(
-            f"Config file {resolved_config_path}: data_path must not point to the config file itself."
-        )
+            f"Config file {resolved_config_path}: {exc}"
+        ) from exc
 
     try:
         limits = Limits.from_mapping(config.get("limits"))
@@ -222,6 +225,28 @@ def read_config(explicit_path: Path | None = None) -> AppConfig:
 
 
 def _atomic_write_config(config_path: Path, config: dict[str, Any]) -> None:
+    validate_config(config, config_path)
+    # Reconfiguration must not replace an existing lock inode, even when the
+    # candidate switches to a different datastore. Inspect only old resource
+    # paths so broken themes and malformed configs can still be repaired.
+    if config_path.exists():
+        try:
+            previous = _read_yaml_document(config_path)
+        except click.ClickException as exc:
+            if isinstance(exc.__cause__, OSError):
+                raise
+            previous = {}
+        previous_data = previous.get("data_path")
+        if isinstance(previous_data, str) and previous_data.strip():
+            try:
+                resolve_board_paths(
+                    _resolve_data_path(previous_data, config_path), config_path
+                )
+            except ValueError as exc:
+                raise click.ClickException(
+                    f"Config file {config_path}: {exc}. "
+                    "Stop board writers and move the config to a separate path."
+                ) from exc
     try:
         with atomic_text_writer(config_path) as outfile:
             yaml.safe_dump(config, outfile, default_flow_style=False, sort_keys=False)
@@ -235,7 +260,6 @@ def write_config_document(
     config: dict[str, Any], explicit_path: Path | None = None
 ) -> Path:
     config_path = get_config_path(explicit_path)
-    validate_config(config, config_path)
     _atomic_write_config(config_path, config)
     return config_path
 

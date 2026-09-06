@@ -12,6 +12,7 @@ Production code lives under `src/kanban_tui/`:
 
 - `cli.py` — Click command surface, native prefix/board/theme completion, board/config selection, theme selection, transfer and undo wiring.
 - `config.py` — XDG/portable/legacy path resolution, named boards, YAML validation and atomic config writes.
+- `resources.py` — shared canonical config/datastore/lock paths and collision checks.
 - `models.py` — typed domain model and persistence-schema invariants.
 - `services.py` — task mutations and workflow/capacity business rules.
 - `atomic.py` — shared same-directory temporary-file lifecycle and cleanup.
@@ -133,7 +134,9 @@ This fallback is read-path compatibility rather than the layout for new installs
 
 `--config` and `--board` are mutually exclusive. Named boards are lowercase slugs; `default` is reserved for the implicit default board.
 
-`data_path` is expanded and resolved deterministically. Relative paths are relative to the configuration file, never to the current shell directory. A config is rejected if its resolved `data_path` points back to the config file itself.
+`data_path` is expanded and resolved deterministically. Relative paths are relative to the configuration file, never to the current shell directory. `resources.py` resolves the config, datastore and sibling lock paths, including symlink aliases, and rejects pairwise collisions. Config validation and export protection use this same resolver; storage uses it to derive the actual lock path and reject datastore/lock aliases.
+
+All config writers validate the candidate before atomic replacement. When an existing config has readable resource paths, writers also check that previous layout, so changing `data_path` or running `configure` cannot replace an active lock inode. Invalid YAML and invalid selected themes can still be repaired when no colliding previous layout is known; filesystem read errors remain errors. These checks protect the selected board's known paths, not arbitrary external changes to symlinks or other boards' configurations.
 
 Limits are strict non-negative integers (digit strings remain accepted for existing configs). Fractional numeric values are rejected rather than truncated. TODO/WIP may be configured as unlimited through the config command layer.
 

@@ -9,6 +9,7 @@ import yaml
 
 from .atomic import atomic_text_writer
 from .models import AppConfig, Board
+from .resources import resolve_board_paths
 
 UNDO_KEY = "_undo"
 
@@ -66,8 +67,11 @@ def _release_file_lock(lock_file: BinaryIO) -> None:
 @contextmanager
 def datastore_lock(config: AppConfig):
     """Hold one OS-backed exclusive writer lock for a datastore transaction."""
-    data_path = config.data_path.resolve()
-    lock_path = Path(f"{data_path}.lock")
+    try:
+        paths = resolve_board_paths(config.data_path)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    data_path, lock_path = paths.data, paths.lock
     lock_file: BinaryIO | None = None
 
     try:

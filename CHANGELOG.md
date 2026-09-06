@@ -4,6 +4,7 @@
 
 ### Fixes and quality
 
+- reject collisions between config, datastore and lock paths, including symlink aliases, before config creation, updates or export; preserve active lock files during reconfiguration;
 - defer theme validation/discovery until invocation and allow recovery from missing or invalid selected themes;
 - retain TUI task selection after rejected moves, undo and filtered refreshes;
 - report invalid UTF-8 inputs with contextual errors;
