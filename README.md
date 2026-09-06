@@ -100,12 +100,16 @@ Keyboard controls:
 - `p`: cycle priority through none, low, normal, high, and urgent.
 - `t`: replace the selected task's comma-separated tag set.
 - `d`: archive the selected task.
-- `r`: restore an archived task by ID.
+- `r`: search archived tasks by ID/text and restore a selection.
+- `Ctrl+R`: reload changes made by CLI commands or another terminal.
 - `u`: undo the last successful board mutation.
 - `/`: search task text, tags, and priority.
 - `c`: clear the current search filter.
 - `?`: show keyboard help.
 - `q`: quit.
+
+The header identifies the selected board and keeps that identity visible during search.
+Refresh preserves the selected task and filter where possible; read errors retain the last valid board.
 
 The CLI remains available for scripting and one-shot operations.
 
@@ -147,6 +151,17 @@ Unique command prefixes are accepted only when unambiguous.
 ## Priority and tags
 
 Metadata is intentionally lightweight and optional. A task may have one priority and zero or more tags.
+
+Create a task with metadata in one command and one undo step:
+
+```bash
+kanban-tui add --priority urgent --tag backend --tag bug Fix login
+kanban-tui add -- --priority is an option name
+```
+
+`--tag` may be repeated; tags are normalized and deduplicated. Invalid metadata
+rejects the whole task creation. Use `--` before task text beginning with an option.
+
 
 Priority values are `low`, `normal`, `high`, and `urgent`; clear a priority with:
 

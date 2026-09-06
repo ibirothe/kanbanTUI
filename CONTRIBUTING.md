@@ -54,7 +54,9 @@ relevant to your contribution.
 | --- | --- |
 | Task invariants and persistence schema | `src/kanban_tui/models.py` |
 | Mutations, ordering and capacity rules | `src/kanban_tui/services.py` |
-| Datastore locking, atomic writes and undo | `src/kanban_tui/storage.py` |
+| Mutation transaction boundaries | `src/kanban_tui/transactions.py` |
+| Datastore locking and undo | `src/kanban_tui/storage.py` |
+| Atomic text-file replacement | `src/kanban_tui/atomic.py` |
 | Paths, named boards and config validation | `src/kanban_tui/config.py` |
 | CLI commands and terminal interaction | `src/kanban_tui/cli.py`, `src/kanban_tui/tui.py` |
 | Presentation and palettes | `src/kanban_tui/rendering.py`, `src/kanban_tui/themes.py` |

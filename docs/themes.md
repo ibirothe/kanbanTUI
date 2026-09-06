@@ -78,6 +78,10 @@ kanban-tui theme set ocean
 kanban-tui tui
 ```
 
+If a selected custom theme is deleted or becomes invalid, recover with
+`kanban-tui theme set arch` or `kanban-tui config set theme arch`. The replacement
+configuration is validated before writing and unrelated settings are preserved.
+
 Custom themes are loaded on demand; they do not require reinstalling kanbanTUI. They are global theme definitions, while the selected theme name remains stored independently in each board configuration.
 
 The palette controls TODO/WIP/DONE colors, task metadata badges, TUI chrome, column borders, dialogs, and selection surfaces. Plain and JSON output remain color-free and stable for scripting. Set `NO_COLOR=1` to disable Rich ANSI colors regardless of the selected theme:

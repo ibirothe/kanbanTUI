@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Fixes and quality
+
+- defer theme validation/discovery until invocation and allow recovery from missing or invalid selected themes;
+- retain TUI task selection after rejected moves, undo and filtered refreshes;
+- report invalid UTF-8 inputs with contextual errors;
+- share atomic writes with reliable temporary-file cleanup and board mutation transactions with detached undo snapshots;
+- restore the local test, lint, formatting and typing baseline and add regression coverage.
+
+### Quality of life
+
+- add priority and repeatable tags during task creation as a single undoable mutation;
+- add Ctrl+R refresh, a searchable archive restore picker and visible board identity to the TUI.
+
 ### Documentation and maintenance
 
 - split configuration, themes and shell completion into linked user references;
