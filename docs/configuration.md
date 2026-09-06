@@ -31,7 +31,7 @@ Existing installations are not abandoned: when no XDG config exists, an existing
 Supported settings:
 
 - `data_path`: datastore path. Relative paths are resolved relative to the configuration file directory.
-- `theme`: color theme; default `mono`.
+- `theme`: color theme; default `nord`.
 - `limits.todo`: optional TODO capacity.
 - `limits.wip`: optional in-progress capacity.
 - `limits.done`: maximum completed tasks displayed; default `10`.
@@ -105,7 +105,7 @@ kanban-tui config set repaint true
 The same commands work with `--board` or `--config`:
 
 ```bash
-kanban-tui --board work config set theme gruvbox
+kanban-tui --board work config set theme nord
 kanban-tui --board work config set limits.wip 2
 kanban-tui --config ~/boards/custom.yaml config show
 ```

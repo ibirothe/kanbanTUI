@@ -20,7 +20,7 @@ from kanban_tui.transfer import read_export
 def test_cli_startup_ignores_invalid_theme_filename(command):
     theme_dir = get_user_theme_dir()
     theme_dir.mkdir(parents=True)
-    (theme_dir / "Bad Name.yaml").write_text("extends: arch\n")
+    (theme_dir / "Bad Name.yaml").write_text("extends: nord\n")
     env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1] / "src"))
     result = subprocess.run(
         [sys.executable, "-c", "from kanban_tui.cli import main; main()", command],
@@ -37,14 +37,14 @@ def test_theme_completion_discovers_files_created_after_parameter():
     parameter = ThemeParamType()
     theme_dir = get_user_theme_dir()
     theme_dir.mkdir(parents=True)
-    (theme_dir / "ocean.yaml").write_text("extends: arch\n")
+    (theme_dir / "ocean.yaml").write_text("extends: nord\n")
     assert [item.value for item in parameter.shell_complete(None, None, "oc")] == [
         "ocean"
     ]
 
 
 @pytest.mark.parametrize(
-    "command", [["config", "set", "theme", "arch"], ["theme", "set", "arch"]]
+    "command", [["config", "set", "theme", "nord"], ["theme", "set", "nord"]]
 )
 @pytest.mark.parametrize("broken", ["missing", "invalid"])
 def test_repair_selected_theme(runner, write_config, command, broken):
@@ -52,7 +52,7 @@ def test_repair_selected_theme(runner, write_config, command, broken):
     theme_dir = get_user_theme_dir()
     theme_dir.mkdir(parents=True)
     theme_path = theme_dir / "ocean.yaml"
-    theme_path.write_text("extends: arch\n")
+    theme_path.write_text("extends: nord\n")
     assert runner.invoke(main, ["config", "set", "theme", "ocean"]).exit_code == 0
     if broken == "missing":
         theme_path.unlink()
@@ -62,7 +62,7 @@ def test_repair_selected_theme(runner, write_config, command, broken):
     assert runner.invoke(main, ["config", "set", "theme", "nonexistent"]).exit_code != 0
     assert get_config_path().read_bytes() == original
     assert runner.invoke(main, command).exit_code == 0
-    assert read_config().theme == "arch"
+    assert read_config().theme == "nord"
 
 
 @pytest.mark.parametrize("kind", ["config", "datastore", "theme", "import"])
@@ -158,12 +158,12 @@ def test_config_repair_preserves_unknown_fields_and_validates_other_settings(
     raw = yaml.safe_load(path.read_text())
     raw.update(theme="missing", custom_field={"keep": "value"})
     path.write_text(yaml.safe_dump(raw))
-    assert runner.invoke(main, ["config", "set", "theme", "arch"]).exit_code == 0
+    assert runner.invoke(main, ["config", "set", "theme", "nord"]).exit_code == 0
     assert yaml.safe_load(path.read_text())["custom_field"] == {"keep": "value"}
     raw.update(limits={"wip": -1})
     path.write_text(yaml.safe_dump(raw))
     original = path.read_bytes()
-    assert runner.invoke(main, ["config", "set", "theme", "arch"]).exit_code != 0
+    assert runner.invoke(main, ["config", "set", "theme", "nord"]).exit_code != 0
     assert path.read_bytes() == original
 
 

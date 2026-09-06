@@ -4,7 +4,7 @@
 
 ### Fixes and quality
 
-- set Mono as the default theme for new and theme-less configs; refresh built-in dark palettes and make the selected TUI task high contrast;
+- retain Nord as the sole built-in theme and default for new and theme-less configs; make the selected TUI task high contrast;
 - reject stale TUI task mutations inside the writer transaction; retain conflicting edit/tag drafts for explicit review and choose reorder neighbors from current data;
 - reject collisions between config, datastore and lock paths, including symlink aliases, before config creation, updates or export; preserve active lock files during reconfiguration;
 - defer theme validation/discovery until invocation and allow recovery from missing or invalid selected themes;
@@ -49,7 +49,7 @@ Current maintained kanbanTUI baseline.
 - added `config path`, `config show`, and validated `config set` commands;
 - standardized concise task-centric command feedback;
 - added persistent per-board color themes shared by Rich and Textual;
-- added built-in `arch`, `nord`, `gruvbox`, `dracula`, and `mono` palettes with `arch` as the backward-compatible default;
+- added the original built-in palette catalog and theme selection commands;
 - added `theme list`, `theme current`, and `theme set NAME`, plus `config set theme NAME`;
 - added custom user themes from XDG/portable YAML files with built-in inheritance and semantic color-role overrides;
 - made theme choices dynamically discoverable so newly created custom YAML files are immediately available to Click validation and shell completion;

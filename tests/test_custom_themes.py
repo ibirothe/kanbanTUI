@@ -29,11 +29,11 @@ def test_invalid_unused_custom_theme_does_not_block_switch_to_builtin(
         encoding="utf-8",
     )
 
-    result = runner.invoke(main, ["theme", "set", "arch"])
+    result = runner.invoke(main, ["theme", "set", "nord"])
 
     assert result.exit_code == 0
     assert (
-        yaml.safe_load(get_config_path().read_text(encoding="utf-8"))["theme"] == "arch"
+        yaml.safe_load(get_config_path().read_text(encoding="utf-8"))["theme"] == "nord"
     )
 
 

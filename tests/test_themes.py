@@ -32,8 +32,8 @@ def write_user_theme(name: str, payload: dict) -> Path:
 
 
 def test_builtin_theme_catalog_is_stable():
-    assert DEFAULT_THEME == "mono"
-    assert theme_names() == ("arch", "nord", "gruvbox", "dracula", "mono")
+    assert DEFAULT_THEME == "nord"
+    assert theme_names() == ("nord",)
 
 
 def test_theme_lookup_is_case_insensitive():
@@ -71,14 +71,14 @@ def test_custom_theme_is_discovered_and_inherits_builtin_palette():
     assert theme.priority_urgent == nord.priority_urgent
 
 
-def test_custom_theme_defaults_to_mono_when_extends_is_omitted():
+def test_custom_theme_defaults_to_nord_when_extends_is_omitted():
     write_user_theme("minimal", {"colors": {"done": "#010203"}})
 
     theme = get_theme("minimal")
 
     assert theme.done == "#010203"
-    assert theme.background == get_theme("mono").background
-    assert theme.description == "Custom theme based on mono"
+    assert theme.background == get_theme("nord").background
+    assert theme.description == "Custom theme based on nord"
 
 
 def test_custom_theme_path_uses_portable_home(isolated_app_home):
@@ -94,7 +94,7 @@ def test_custom_theme_path_uses_xdg_config_home(monkeypatch, tmp_path):
 
 
 def test_builtin_theme_name_cannot_be_overridden():
-    write_user_theme("arch", {"colors": {"accent": "#ffffff"}})
+    write_user_theme("nord", {"colors": {"accent": "#ffffff"}})
 
     with pytest.raises(ValueError, match="reserved built-in name"):
         tuple(theme_names())
@@ -118,13 +118,13 @@ def test_custom_theme_rejects_non_builtin_parent():
         get_theme("child")
 
 
-def test_config_without_theme_defaults_to_mono(tmp_path):
+def test_config_without_theme_defaults_to_nord(tmp_path):
     config = validate_config(
         {"data_path": str(tmp_path / "board.dat")},
         tmp_path / "config.yaml",
     )
 
-    assert config.theme == "mono"
+    assert config.theme == "nord"
 
 
 def test_invalid_config_theme_is_rejected(tmp_path):
@@ -136,7 +136,7 @@ def test_invalid_config_theme_is_rejected(tmp_path):
 
 
 def test_custom_theme_is_valid_in_config(tmp_path):
-    write_user_theme("ocean", {"extends": "gruvbox", "colors": {"accent": "#112233"}})
+    write_user_theme("ocean", {"extends": "nord", "colors": {"accent": "#112233"}})
 
     config = validate_config(
         {"data_path": str(tmp_path / "board.dat"), "theme": "ocean"},
@@ -155,10 +155,9 @@ def test_theme_cli_lists_sets_and_reports_selected_theme(runner, write_config):
     config_show = runner.invoke(main, ["config", "show"])
 
     assert current.exit_code == 0
-    assert current.output == "mono\n"
+    assert current.output == "nord\n"
     assert listing.exit_code == 0
-    assert "* mono\t" in listing.output
-    assert "  nord\t" in listing.output
+    assert "* nord\t" in listing.output
     assert changed.exit_code == 0
     assert "Theme set to nord" in changed.output
     assert "theme: nord" in config_show.output
@@ -172,7 +171,7 @@ def test_theme_cli_discovers_custom_theme_created_after_cli_import(
         "ocean",
         {
             "description": "Ocean development theme",
-            "extends": "arch",
+            "extends": "nord",
             "colors": {"accent": "#00aaff"},
         },
     )
@@ -203,12 +202,12 @@ def test_invalid_custom_theme_cli_error_is_actionable(runner, write_config):
 def test_config_set_theme_uses_same_validation(runner, write_config):
     write_config()
 
-    changed = runner.invoke(main, ["config", "set", "theme", "gruvbox"])
+    changed = runner.invoke(main, ["config", "set", "theme", "nord"])
     invalid = runner.invoke(main, ["config", "set", "theme", "missing"])
 
     assert changed.exit_code == 0
     raw = yaml.safe_load(get_config_path().read_text(encoding="utf-8"))
-    assert raw["theme"] == "gruvbox"
+    assert raw["theme"] == "nord"
     assert invalid.exit_code != 0
     assert "unknown theme" in invalid.output
 
@@ -217,15 +216,15 @@ def test_named_boards_keep_independent_theme_selection(runner):
     assert runner.invoke(main, ["board", "create", "work"]).exit_code == 0
     assert runner.invoke(main, ["board", "create", "personal"]).exit_code == 0
 
-    changed = runner.invoke(main, ["--board", "work", "theme", "set", "dracula"])
+    changed = runner.invoke(main, ["--board", "work", "theme", "set", "nord"])
 
     assert changed.exit_code == 0
     work = yaml.safe_load(get_board_config_path("work").read_text(encoding="utf-8"))
     personal = yaml.safe_load(
         get_board_config_path("personal").read_text(encoding="utf-8")
     )
-    assert work["theme"] == "dracula"
-    assert personal["theme"] == "mono"
+    assert work["theme"] == "nord"
+    assert personal["theme"] == "nord"
 
 
 def test_named_board_can_select_custom_theme(runner):
@@ -260,7 +259,7 @@ def test_rich_task_text_uses_theme_semantic_styles():
 
 
 def test_no_color_disables_rich_ansi(monkeypatch, capsys):
-    config = AppConfig(data_path=Path("/tmp/unused"), theme="dracula")
+    config = AppConfig(data_path=Path("/tmp/unused"), theme="nord")
     board = Board(
         active={
             1: Task(
@@ -285,17 +284,17 @@ def test_no_color_disables_rich_ansi(monkeypatch, capsys):
 
 async def test_tui_applies_selected_palette(write_config):
     config = write_config()
-    config.theme = "gruvbox"
+    config.theme = "nord"
     app = KanbanApp(config)
 
     async with app.run_test() as pilot:
         await pilot.pause()
-        assert app.palette.name == "gruvbox"
+        assert app.palette.name == "nord"
         assert app.query_one("#todo-title", Static).styles.color is not None
         assert app.query_one("#status", Static).styles.background is not None
 
 
-@pytest.mark.parametrize("theme_name", ["arch", "nord", "gruvbox", "dracula", "mono"])
+@pytest.mark.parametrize("theme_name", ["nord"])
 async def test_tui_selected_task_uses_high_contrast_palette_colors(
     write_config, theme_name
 ):
@@ -319,7 +318,7 @@ async def test_tui_applies_custom_palette(write_config):
     write_user_theme(
         "ocean",
         {
-            "extends": "arch",
+            "extends": "nord",
             "colors": {
                 "accent": "#00aaff",
                 "todo": "#11bbff",
