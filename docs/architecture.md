@@ -13,7 +13,7 @@ Production code lives under `src/kanban_tui/`:
 - `cli.py` — Click command surface, native prefix/board/theme completion, board/config selection, theme selection, transfer and undo wiring.
 - `config.py` — XDG/portable/legacy path resolution, named boards, YAML validation and atomic config writes.
 - `resources.py` — shared canonical config/datastore/lock paths and collision checks.
-- `models.py` — typed domain model and persistence-schema invariants.
+- `models.py` — typed domain model and business invariants.
 - `services.py` — task mutations and workflow/capacity business rules.
 - `atomic.py` — shared same-directory temporary-file lifecycle and cleanup.
 - `transactions.py` — shared lock/read/mutate/write and undo application boundaries.
@@ -190,6 +190,8 @@ Imports are parsed into the validated domain model before persistence. Imported 
 `TaskExpectation` captures a detached, immutable representation of the complete task domain state and its active/archive bucket. Comparisons include identity fields, content, metadata, state and ordering, not just `modified_at`; no persistence record encoding leaks into this concurrency check. This is a state comparison, not a durable revision history: replacement with exactly identical task state is semantically indistinguishable.
 
 Edit/tag dialogs retain their drafts on conflict and require explicit Ctrl+R review before a new submission. The subsequent commit checks the refreshed expectation again. Missing or archived tasks remain blocked. Other selected-task shortcuts reject stale state and refresh the board; archive conflicts require reopening the picker. Relative reordering checks the selected task and resolves its current neighbor inside the transaction, so unrelated neighbor changes do not apply an obsolete target. Changes to unrelated task content do not invalidate a task expectation.
+
+Add, edit and tag dialogs submit through a shared transactional prompt. Validation and capacity failures return their service messages next to the focused input; lock and write failures use the same retry path. The draft remains unchanged and the input is disabled while one submission is applying, preventing duplicate confirmation. Only a successful operation dismisses the dialog. Escape dismisses without another transaction and the board refresh restores the prior task selection.
 
 The Textual TUI calls the same services and storage functions as the CLI. Validation, capacity rules, locking, undo, metadata normalization and ordering therefore have one implementation.
 
