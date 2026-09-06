@@ -1,8 +1,13 @@
 import pytest
 
-from kanban_tui.services import OperationResult, add_tasks
+from kanban_tui.services import OperationResult, add_tasks, edit_task
 from kanban_tui.storage import read_data
-from kanban_tui.transactions import mutate_board, undo_board
+from kanban_tui.transactions import (
+    TaskConflict,
+    TaskExpectation,
+    mutate_board,
+    undo_board,
+)
 
 
 def test_transaction_reads_once_and_snapshots_detached_state(write_config, monkeypatch):
@@ -21,6 +26,37 @@ def test_transaction_reads_once_and_snapshots_detached_state(write_config, monke
     assert len(reads) == 1
     board.active[1].text = "changed in memory"
     assert not undo_board(config).active
+
+
+def test_conflict_prevents_operation_and_preserves_snapshot(write_config):
+    config = write_config()
+    board, _ = mutate_board(config, lambda b: add_tasks(config, b, ["one"]))
+    expected = TaskExpectation.capture(board.active[1])
+    mutate_board(config, lambda b: edit_task(config, b, "1", "external"))
+    original = config.data_path.read_bytes()
+
+    def must_not_run(board):
+        pytest.fail("Conflicting operation ran")
+
+    with pytest.raises(TaskConflict) as caught:
+        mutate_board(config, must_not_run, expected_tasks=(expected,))
+    assert caught.value.board.active[1].text == "external"
+    assert config.data_path.read_bytes() == original
+    assert undo_board(config).active[1].text == "one"
+
+
+def test_expectation_is_detached_and_accepts_persistence_roundtrip(write_config):
+    config = write_config()
+    board, _ = mutate_board(config, lambda b: add_tasks(config, b, ["one"]))
+    expected = TaskExpectation.capture(board.active[1])
+    board.active[1].text = "unpersisted local edit"
+    current, result = mutate_board(
+        config,
+        lambda b: edit_task(config, b, "1", "two"),
+        expected_tasks=(expected,),
+    )
+    assert result.succeeded == 1
+    assert current.active[1].text == "two"
 
 
 def test_failed_and_noop_transactions_preserve_snapshot(write_config):

@@ -447,6 +447,34 @@ def reorder_task(
     return result
 
 
+def reorder_task_relative(board: Board, task_id: str, delta: int) -> OperationResult:
+    """Choose the adjacent task from the current transaction's board."""
+    result = OperationResult()
+    task, error = _active_task(board, task_id)
+    if error is not None:
+        result.failure(error)
+        return result
+    assert task is not None
+    if delta not in {-1, 1}:
+        result.failure("Error: relative position must be -1 or 1.")
+        return result
+    if task.state is TaskState.DONE:
+        result.failure("Error: completed tasks are ordered by completion time.")
+        return result
+    ordered = board.ordered_tasks(task.state)
+    index = next(i for i, candidate in enumerate(ordered) if candidate.id == task.id)
+    neighbor_index = index + delta
+    if not 0 <= neighbor_index < len(ordered):
+        result.failure("Task is already at the edge of the column.")
+        return result
+    return reorder_task(
+        board,
+        task_id,
+        "before" if delta < 0 else "after",
+        str(ordered[neighbor_index].id),
+    )
+
+
 def set_task_priority(
     board: Board,
     task_id: str,
