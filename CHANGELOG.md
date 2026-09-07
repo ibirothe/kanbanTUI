@@ -4,6 +4,7 @@
 
 ### Fixes and quality
 
+- isolate the versioned board transfer payload codec and its errors from Click and filesystem adapters so additional transports can reuse the same validation;
 - route shared read, mutation, import and undo use cases through application-owned store/transaction protocols; provide a YAML adapter and an in-memory contract test double;
 - return typed per-task operation codes, parameters and `changed`/`unchanged`/`rejected` states from services; format output and choose CLI streams/exit codes only in adapters;
 - separate task/board models and `BoardPolicy` from application paths, themes and terminal dependencies; translate pure import-policy errors only in adapters;
