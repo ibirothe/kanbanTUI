@@ -204,7 +204,7 @@ def test_cli_passes_board_identity(
     captured = []
     monkeypatch.setattr(
         "kanban_tui.tui.run_tui",
-        lambda config, *, board_name: captured.append(board_name),
+        lambda config, *, application, board_name: captured.append(board_name),
     )
     result = runner.invoke(main, [*selection, "tui"])
     assert result.exit_code == 0, result.output

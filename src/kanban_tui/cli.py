@@ -3,6 +3,7 @@ from pathlib import Path
 import click
 
 from . import VERSION
+from .application import BoardApplication, StoreError
 from .config import (
     create_default_config,
     create_named_board,
@@ -13,12 +14,13 @@ from .config import (
     set_config_value,
     validate_board_name,
 )
+from .imports import ImportMode
 from .models import TaskPriority, TaskState, normalize_tag
 from .operation_messages import format_operation
-from .policy import PolicyViolation, validate_imported_board
+from .policy import PolicyViolation
 from .rendering import SORT_CHOICES, render_board, render_history
 from .resources import resolve_board_paths
-from .results import OperationCode, OperationResult, OperationStatus
+from .results import OperationResult, OperationStatus
 from .services import (
     add_tasks,
     delete_tasks,
@@ -31,14 +33,10 @@ from .services import (
     set_task_priority,
     update_task_tag,
 )
-from .storage import read_data
+from .settings import AppConfig
+from .storage import YamlBoardStore
 from .themes import get_theme, theme_names
-from .transactions import mutate_board, undo_board
-from .transfer import (
-    merge_boards,
-    read_export,
-    write_export,
-)
+from .transfer import read_export, write_export
 
 
 class ThemeParamType(click.ParamType):
@@ -81,6 +79,12 @@ class PrefixGroup(click.Group):
             return super().get_command(ctx, matches[0])
         ctx.fail("Too many matches: %s" % ", ".join(sorted(matches)))
 
+    def invoke(self, ctx):
+        try:
+            return super().invoke(ctx)
+        except StoreError as exc:
+            raise click.ClickException(str(exc)) from exc
+
 
 def _selected_config_path() -> Path | None:
     root_context = click.get_current_context().find_root()
@@ -100,6 +104,16 @@ def _effective_config_path() -> Path:
 
 def _read_config():
     return read_config(_selected_config_path())
+
+
+def _runtime() -> tuple[AppConfig, BoardApplication]:
+    root = click.get_current_context().find_root()
+    runtime = root.meta.get("kanban_tui.runtime")
+    if runtime is None:
+        config = _read_config()
+        runtime = (config, BoardApplication(YamlBoardStore(config)))
+        root.meta["kanban_tui.runtime"] = runtime
+    return runtime
 
 
 def _complete_board_name(ctx, param, incomplete):
@@ -125,9 +139,8 @@ def _complete_operation(result: OperationResult, config) -> None:
 
 
 def _run_state_command(ids: tuple[str, ...], target_state: TaskState) -> None:
-    config = _read_config()
-    _, result = mutate_board(
-        config,
+    config, application = _runtime()
+    _, result = application.mutate(
         lambda board: move_tasks_to_state(config.policy, board, ids, target_state),
     )
     _complete_operation(result, config)
@@ -306,10 +319,9 @@ def theme_set(name):
 @click.option("--tag", "tags", multiple=True, help="Add a tag; may be repeated.")
 def add(task_words, priority, tags):
     """Add one task to TODO."""
-    config = _read_config()
+    config, application = _runtime()
     task_text = " ".join(task_words)
-    _, result = mutate_board(
-        config,
+    _, result = application.mutate(
         lambda board: add_tasks(
             config.policy, board, [task_text], priority=priority, tags=tags
         ),
@@ -322,10 +334,10 @@ def add(task_words, priority, tags):
 @click.argument("task_words", nargs=-1, required=True)
 def edit(task_id, task_words):
     """Edit the text of an active task."""
-    config = _read_config()
+    config, application = _runtime()
     task_text = " ".join(task_words)
-    _, result = mutate_board(
-        config, lambda board: edit_task(config.policy, board, task_id, task_text)
+    _, result = application.mutate(
+        lambda board: edit_task(config.policy, board, task_id, task_text)
     )
     _complete_operation(result, config)
 
@@ -338,10 +350,10 @@ def edit(task_id, task_words):
 )
 def priority(task_id, level):
     """Set or clear an active task priority."""
-    config = _read_config()
+    config, application = _runtime()
     selected = None if level == "clear" else TaskPriority(level)
-    _, result = mutate_board(
-        config, lambda board: set_task_priority(board, task_id, selected)
+    _, result = application.mutate(
+        lambda board: set_task_priority(board, task_id, selected)
     )
     _complete_operation(result, config)
 
@@ -375,9 +387,9 @@ def tag_clear(task_id):
 
 
 def _run_tag_command(task_id: str, action: str, tag: str | None = None) -> None:
-    config = _read_config()
-    _, result = mutate_board(
-        config, lambda board: update_task_tag(board, task_id, action, tag)
+    config, application = _runtime()
+    _, result = application.mutate(
+        lambda board: update_task_tag(board, task_id, action, tag)
     )
     _complete_operation(result, config)
 
@@ -386,8 +398,8 @@ def _run_tag_command(task_id: str, action: str, tag: str | None = None) -> None:
 @click.argument("ids", nargs=-1, required=True)
 def delete(ids):
     """Archive tasks."""
-    config = _read_config()
-    _, result = mutate_board(config, lambda board: delete_tasks(board, ids))
+    config, application = _runtime()
+    _, result = application.mutate(lambda board: delete_tasks(board, ids))
     _complete_operation(result, config)
 
 
@@ -395,9 +407,9 @@ def delete(ids):
 @click.argument("ids", nargs=-1, required=True)
 def restore(ids):
     """Restore archived tasks to TODO."""
-    config = _read_config()
-    _, result = mutate_board(
-        config, lambda board: restore_tasks(config.policy, board, ids)
+    config, application = _runtime()
+    _, result = application.mutate(
+        lambda board: restore_tasks(config.policy, board, ids)
     )
     _complete_operation(result, config)
 
@@ -427,9 +439,9 @@ def todo(ids):
 @click.argument("ids", nargs=-1, required=True)
 def promote(ids):
     """Advance tasks by one state."""
-    config = _read_config()
-    _, result = mutate_board(
-        config, lambda board: promote_tasks(config.policy, board, ids)
+    config, application = _runtime()
+    _, result = application.mutate(
+        lambda board: promote_tasks(config.policy, board, ids)
     )
     _complete_operation(result, config)
 
@@ -438,9 +450,9 @@ def promote(ids):
 @click.argument("ids", nargs=-1, required=True)
 def regress(ids):
     """Move tasks back by one state."""
-    config = _read_config()
-    _, result = mutate_board(
-        config, lambda board: regress_tasks(config.policy, board, ids)
+    config, application = _runtime()
+    _, result = application.mutate(
+        lambda board: regress_tasks(config.policy, board, ids)
     )
     _complete_operation(result, config)
 
@@ -456,9 +468,9 @@ def move(task_id, target, reference_id):
     if target in {"top", "bottom"} and reference_id is not None:
         raise click.UsageError(f"{target} does not accept REFERENCE_ID")
 
-    config = _read_config()
-    _, result = mutate_board(
-        config, lambda board: reorder_task(board, task_id, target, reference_id)
+    config, application = _runtime()
+    _, result = application.mutate(
+        lambda board: reorder_task(board, task_id, target, reference_id)
     )
     _complete_operation(result, config)
 
@@ -468,9 +480,9 @@ def move(task_id, target, reference_id):
 @click.option("--force", is_flag=True, help="Overwrite an existing export file.")
 def export_command(path, force):
     """Export the complete selected board as JSON."""
-    config = _read_config()
+    config, application = _runtime()
     target = _validate_export_target(path, config)
-    board = read_data(config, initialize_missing=False)
+    board = application.read()
     exported_path = write_export(target, board, overwrite=force)
     click.echo(f"Exported board to {exported_path}")
 
@@ -489,41 +501,16 @@ def export_command(path, force):
 def import_command(path, mode):
     """Import a complete board export."""
     imported = read_export(path)
-    config = _read_config()
+    config, application = _runtime()
     try:
-        validate_imported_board(config.policy, imported)
+        _, result = application.import_board(
+            config.policy,
+            imported,
+            ImportMode(mode.lower()),
+            source=str(path.resolve()),
+        )
     except PolicyViolation as exc:
         raise click.ClickException(str(exc)) from exc
-    mode_name = mode.lower()
-    remapped: dict[int, int] = {}
-
-    def apply_import(current):
-        nonlocal remapped
-        target = imported
-        if mode_name != "replace":
-            target, remapped = merge_boards(current, imported)
-        result = OperationResult()
-        if target == current:
-            result.no_change(OperationCode.IMPORT_UNCHANGED)
-            return result
-        try:
-            validate_imported_board(config.policy, target)
-        except PolicyViolation as exc:
-            raise click.ClickException(str(exc)) from exc
-        current.active, current.deleted = target.active, target.deleted
-        result.change(
-            OperationCode.IMPORT_COMPLETED,
-            text=str(path.resolve()),
-            action=mode_name,
-        )
-        if remapped:
-            mapping = ", ".join(
-                f"#{old_id}->#{new_id}" for old_id, new_id in sorted(remapped.items())
-            )
-            result.no_change(OperationCode.IDS_REMAPPED, text=mapping)
-        return result
-
-    _, result = mutate_board(config, apply_import)
     _echo_result(result)
     if not result.changed:
         return
@@ -534,8 +521,8 @@ def import_command(path, mode):
 @main.command()
 def undo():
     """Undo the last successful board mutation."""
-    config = _read_config()
-    undo_board(config)
+    config, application = _runtime()
+    application.undo()
     click.echo("Undid last board change.")
     if config.presentation.repaint:
         display()
@@ -551,8 +538,8 @@ def display(
     unprioritized_only: bool = False,
     tag_filter: str | None = None,
 ) -> None:
-    config = _read_config()
-    board = read_data(config, initialize_missing=False)
+    config, application = _runtime()
+    board = application.read()
     render_board(
         config,
         board,
@@ -628,7 +615,7 @@ def show(output_format, state_name, search, sort_by, priority_name, tag_name):
 @main.command(name="tui")
 def tui_command():
     """Open the interactive full-screen board."""
-    config = _read_config()
+    config, application = _runtime()
     from .tui import run_tui
 
     params = click.get_current_context().find_root().params
@@ -636,12 +623,12 @@ def tui_command():
     identity = str(params.get("board_name") or "default")
     if isinstance(explicit, Path):
         identity = f"config: {explicit.name}"
-    run_tui(config, board_name=identity)
+    run_tui(config, application=application, board_name=identity)
 
 
 @main.command()
 def history():
     """Show archived task history."""
-    config = _read_config()
-    board = read_data(config, initialize_missing=False)
+    config, application = _runtime()
+    board = application.read()
     render_history(board, config)

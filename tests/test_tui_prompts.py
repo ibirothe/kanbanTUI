@@ -1,12 +1,13 @@
-import click
 import pytest
 from textual.widgets import Input, Static
 
+from kanban_tui.application import BoardApplication
 from kanban_tui.models import Board
 from kanban_tui.services import add_tasks
-from kanban_tui.storage import datastore_lock, read_data, write_data
+from kanban_tui.storage import YamlBoardStore, datastore_lock, read_data, write_data
 from kanban_tui.transactions import undo_board
 from kanban_tui.tui import KanbanApp, MutationPromptScreen
+from tests.store_test_double import FailOnceCommitStore
 
 
 def seed_board(config, *tasks: str) -> None:
@@ -128,26 +129,13 @@ async def test_lock_error_keeps_add_draft_for_retry(write_config):
 
 
 async def test_write_error_keeps_edit_draft_and_writes_once_on_retry(
-    write_config, monkeypatch
+    write_config,
 ):
     config = write_config()
     seed_board(config, "before")
     original = config.data_path.read_bytes()
-    app = KanbanApp(config)
-
-    import kanban_tui.transactions as transactions
-
-    actual_write = transactions.write_data
-    calls = 0
-
-    def fail_once(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            raise click.ClickException("simulated write failure")
-        return actual_write(*args, **kwargs)
-
-    monkeypatch.setattr(transactions, "write_data", fail_once)
+    store = FailOnceCommitStore(YamlBoardStore(config))
+    app = KanbanApp(config, application=BoardApplication(store))
 
     async with app.run_test() as pilot:
         await pilot.press("e")
@@ -170,6 +158,6 @@ async def test_write_error_keeps_edit_draft_and_writes_once_on_retry(
 
         assert app.screen is not screen
 
-    assert calls == 2
+    assert store.attempts == 2
     assert read_data(config).active[1].text == "after"
     assert undo_board(config).active[1].text == "before"
