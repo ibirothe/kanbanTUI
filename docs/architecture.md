@@ -26,7 +26,8 @@ Production code lives under `src/kanban_tui/`:
 - `storage.py` — YAML implementation of the application ports plus side-effect-free reads, cross-process writer locking, atomic writes and undo.
 - `codec.py` — strict YAML parsing, datastore schema versioning and legacy record migration.
 - `themes.py` — semantic built-in palettes plus XDG/portable custom-theme discovery and YAML validation.
-- `transfer.py` — complete JSON export/import, validation and merge ID remapping.
+- `transfer_format.py` — transport-neutral versioned board payload encoding and validation.
+- `transfer.py` — JSON file I/O and Click error translation for board transfer.
 - `rendering.py` — themed Rich table/history rendering plus plain/JSON views, filters and sorting.
 - `tui.py` — Textual full-screen UI using the same services, persistence layer and semantic theme palette as the CLI.
 
@@ -195,9 +196,9 @@ Each successful semantic mutation writes the new board and immediately previous 
 
 ## Transfer format
 
-Complete transfer uses the distinct versioned `kanbanTUI-board` JSON envelope, version 1. It is not the datastore schema. Imports reject non-integer versions and unknown envelope or task fields. Exports include all active and archived tasks independent of view filters or DONE display limits.
+Complete transfer uses the distinct versioned `kanbanTUI-board` JSON envelope, version 1. It is not the datastore schema. `transfer_format.py` owns its transport-neutral dictionary encoding and validation and exposes `TransferFormatError` without depending on Click, filesystem paths or a specific transport. Imports reject non-integer versions and unknown envelope or task fields. Exports include all active and archived tasks independent of view filters or DONE display limits.
 
-Imports are parsed into the validated domain model by the JSON adapter before persistence. `BoardApplication.import_board()` owns merge/replace selection, deterministic remapping, policy validation and transactional commit. The CLI supplies only the decoded board, mode and display source, then translates a pure `PolicyViolation` into its Click error.
+The JSON file adapter in `transfer.py` delegates payload conversion to that codec and owns only file I/O plus Click error translation. Other input adapters can use the same codec without importing Click. `BoardApplication.import_board()` owns merge/replace selection, deterministic remapping, policy validation and transactional commit. The CLI supplies only the decoded board, mode and display source, then translates a pure `PolicyViolation` into its Click error.
 
 `replace` preserves imported IDs. `merge` preserves non-conflicting IDs and deterministically remaps collisions against active or archived history. Export refuses destinations that resolve to the selected board's config file, datastore or datastore lock file.
 
