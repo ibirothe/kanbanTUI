@@ -23,17 +23,11 @@ from .services import (
     set_task_tags,
 )
 from .storage import read_data
-from .themes import DEFAULT_THEME, Theme, get_theme
+from .themes import Theme, get_theme
 from .transactions import TaskConflict, TaskExpectation, mutate_board, undo_board
 
 
-def _app_theme(screen: ModalScreen) -> Theme:
-    config = getattr(screen.app, "config", None)
-    return get_theme(getattr(config, "theme", DEFAULT_THEME))
-
-
-def _style_dialog(screen: ModalScreen, dialog_id: str) -> None:
-    theme = _app_theme(screen)
+def _style_dialog(screen: ModalScreen, dialog_id: str, theme: Theme) -> None:
     screen.styles.background = theme.background
     screen.styles.color = theme.text
     dialog = screen.query_one(dialog_id, Vertical)
@@ -72,12 +66,14 @@ class PromptScreen(ModalScreen[str | None]):
     def __init__(
         self,
         prompt: str,
+        palette: Theme,
         *,
         initial: str = "",
         input_type: Literal["integer", "number", "text"] = "text",
     ) -> None:
         super().__init__()
         self.prompt = prompt
+        self.palette = palette
         self.initial = initial
         self.input_type = input_type
 
@@ -94,13 +90,12 @@ class PromptScreen(ModalScreen[str | None]):
             yield Static("", id="prompt-status")
 
     def on_mount(self) -> None:
-        _style_dialog(self, "#prompt-dialog")
-        theme = _app_theme(self)
+        _style_dialog(self, "#prompt-dialog", self.palette)
         input_widget = self.query_one("#prompt-input", Input)
-        input_widget.styles.border = ("round", theme.accent)
-        input_widget.styles.background = theme.background
-        input_widget.styles.color = theme.text
-        self.query_one("#prompt-hint", Static).styles.color = theme.muted
+        input_widget.styles.border = ("round", self.palette.accent)
+        input_widget.styles.background = self.palette.background
+        input_widget.styles.color = self.palette.text
+        self.query_one("#prompt-hint", Static).styles.color = self.palette.muted
         input_widget.focus()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -117,10 +112,11 @@ class MutationPromptScreen(PromptScreen):
         self,
         config: AppConfig,
         prompt: str,
+        palette: Theme,
         *,
         initial: str = "",
     ) -> None:
-        super().__init__(prompt, initial=initial)
+        super().__init__(prompt, palette, initial=initial)
         self.config = config
         self.current_board: Board | None = None
         self.outcome: OperationResult | None = None
@@ -136,11 +132,10 @@ class MutationPromptScreen(PromptScreen):
         return None
 
     def _status(self, message: str, *, error: bool = True) -> None:
-        theme = _app_theme(self)
         input_widget = self.query_one("#prompt-input", Input)
         input_widget.styles.border = (
             "round",
-            theme.priority_urgent if error else theme.accent,
+            self.palette.priority_urgent if error else self.palette.accent,
         )
         self.query_one("#prompt-status", Static).update(Text(message))
         input_widget.focus()
@@ -196,8 +191,8 @@ class MutationPromptScreen(PromptScreen):
 class AddTaskPromptScreen(MutationPromptScreen):
     """Add one task without discarding rejected input."""
 
-    def __init__(self, config: AppConfig) -> None:
-        super().__init__(config, "Add task")
+    def __init__(self, config: AppConfig, palette: Theme) -> None:
+        super().__init__(config, "Add task", palette)
 
     def _apply(self, board: Board, value: str) -> OperationResult:
         return add_tasks(self.config, board, [value])
@@ -209,11 +204,16 @@ class TaskPromptScreen(MutationPromptScreen):
     BINDINGS = [Binding("ctrl+r", "review_current", "Review current task")]
 
     def __init__(
-        self, config: AppConfig, task: Task, field: Literal["text", "tags"]
+        self,
+        config: AppConfig,
+        task: Task,
+        field: Literal["text", "tags"],
+        palette: Theme,
     ) -> None:
         super().__init__(
             config,
             "Edit task" if field == "text" else "Set tags (comma-separated)",
+            palette,
             initial=task.text if field == "text" else ", ".join(task.tags),
         )
         self.field = field
@@ -285,6 +285,10 @@ class HelpScreen(ModalScreen[None]):
     }
     """
 
+    def __init__(self, palette: Theme) -> None:
+        super().__init__()
+        self.palette = palette
+
     def compose(self) -> ComposeResult:
         with Vertical(id="help-dialog"):
             yield Label("kanbanTUI keyboard")
@@ -307,7 +311,7 @@ class HelpScreen(ModalScreen[None]):
             )
 
     def on_mount(self) -> None:
-        _style_dialog(self, "#help-dialog")
+        _style_dialog(self, "#help-dialog", self.palette)
 
     def action_close(self) -> None:
         self.dismiss(None)
@@ -332,10 +336,11 @@ class ArchiveScreen(ModalScreen[tuple[Board, int] | None]):
     #archive-status { height: auto; }
     """
 
-    def __init__(self, config: AppConfig, board: Board) -> None:
+    def __init__(self, config: AppConfig, board: Board, palette: Theme) -> None:
         super().__init__()
         self.config = config
         self.board = board
+        self.palette = palette
 
     def compose(self) -> ComposeResult:
         with Vertical(id="archive-dialog"):
@@ -347,7 +352,7 @@ class ArchiveScreen(ModalScreen[tuple[Board, int] | None]):
             )
 
     async def on_mount(self) -> None:
-        _style_dialog(self, "#archive-dialog")
+        _style_dialog(self, "#archive-dialog", self.palette)
         await self._filter("")
         self.query_one("#archive-search", Input).focus()
 
@@ -359,9 +364,7 @@ class ArchiveScreen(ModalScreen[tuple[Board, int] | None]):
             for task in sorted(self.board.deleted.values(), key=lambda task: task.id)
             if query.casefold() in f"{task.id} {task.text}".casefold()
         ]
-        await view.extend(
-            TaskListItem(task, get_theme(self.config.theme)) for task in tasks
-        )
+        await view.extend(TaskListItem(task, self.palette) for task in tasks)
         if tasks:
             view.index = 0
         self.query_one("#archive-status", Static).update(
@@ -713,7 +716,7 @@ class KanbanApp(App[None]):
         self._current_view().action_cursor_up()
 
     def action_add_task(self) -> None:
-        screen = AddTaskPromptScreen(self.config)
+        screen = AddTaskPromptScreen(self.config, self.palette)
         self.push_screen(
             screen,
             lambda value: self._mutation_prompt_result(screen, value),
@@ -726,7 +729,7 @@ class KanbanApp(App[None]):
         self._open_task_prompt(task, "text")
 
     def _open_task_prompt(self, task: Task, field: Literal["text", "tags"]) -> None:
-        screen = TaskPromptScreen(self.config, task, field)
+        screen = TaskPromptScreen(self.config, task, field, self.palette)
         self.push_screen(
             screen,
             lambda value: self._mutation_prompt_result(screen, value, task.id),
@@ -778,7 +781,9 @@ class KanbanApp(App[None]):
         except click.ClickException as exc:
             self._set_status(f"Error: {exc}")
             return
-        self.push_screen(ArchiveScreen(self.config, board), self._archive_result)
+        self.push_screen(
+            ArchiveScreen(self.config, board, self.palette), self._archive_result
+        )
 
     async def _archive_result(self, result: tuple[Board, int] | None) -> None:
         if result is not None:
@@ -814,7 +819,7 @@ class KanbanApp(App[None]):
 
     def action_search(self) -> None:
         self.push_screen(
-            PromptScreen("Search tasks", initial=self.filter_text),
+            PromptScreen("Search tasks", self.palette, initial=self.filter_text),
             self._search_prompt_result,
         )
 
@@ -879,7 +884,7 @@ class KanbanApp(App[None]):
         await self._reprioritize(1)
 
     def action_help(self) -> None:
-        self.push_screen(HelpScreen())
+        self.push_screen(HelpScreen(self.palette))
 
 
 def run_tui(config: AppConfig, *, board_name: str = "default") -> None:

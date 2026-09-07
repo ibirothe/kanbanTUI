@@ -4,6 +4,7 @@
 
 ### Fixes and quality
 
+- keep one resolved palette for each TUI session and allow unstyled commands to operate when the selected custom-theme file becomes unavailable;
 - retain add, edit and tag drafts in the focused TUI prompt across validation, capacity, lock and write failures so users can correct or retry without retyping;
 - add a strict versioned datastore codec that rejects duplicate YAML keys, unknown fields and unsupported schemas without mutating data;
 - preserve timestamp microseconds across persistence, JSON and undo so DONE ordering remains stable within one second;

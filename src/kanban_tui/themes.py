@@ -99,7 +99,8 @@ def get_user_theme_dir() -> Path:
     return config_root.resolve() / APP_DIR_NAME / "themes"
 
 
-def _normalize_theme_name(name: str) -> str:
+def normalize_theme_name(name: str) -> str:
+    """Validate and normalize a theme name without accessing the filesystem."""
     if not isinstance(name, str):
         raise ThemeError("theme name must be a string")
     normalized = name.strip().lower()
@@ -111,7 +112,7 @@ def _normalize_theme_name(name: str) -> str:
 
 
 def _theme_name_from_path(path: Path) -> str:
-    normalized = _normalize_theme_name(path.stem)
+    normalized = normalize_theme_name(path.stem)
     if path.stem != normalized:
         raise ThemeError(
             f"custom theme filename must be a lowercase theme slug: {path.name}"
@@ -170,7 +171,7 @@ def _load_custom_theme(path: Path) -> Theme:
     raw_base = raw.get("extends", DEFAULT_THEME)
     if not isinstance(raw_base, str):
         raise ThemeError(f"custom theme {path}: extends must be a built-in theme name")
-    base_name = _normalize_theme_name(raw_base)
+    base_name = normalize_theme_name(raw_base)
     if base_name not in THEMES:
         choices = ", ".join(THEMES)
         raise ThemeError(
@@ -239,7 +240,7 @@ def theme_names() -> Sequence[str]:
 
 def get_theme(name: str) -> Theme:
     """Resolve a built-in or user-defined theme by name."""
-    normalized = _normalize_theme_name(name)
+    normalized = normalize_theme_name(name)
     builtin = THEMES.get(normalized)
     if builtin is not None:
         return builtin

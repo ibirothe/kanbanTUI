@@ -9,7 +9,7 @@ import yaml
 from .atomic import atomic_text_writer
 from .models import AppConfig, Limits
 from .resources import resolve_board_paths
-from .themes import DEFAULT_THEME, get_theme
+from .themes import DEFAULT_THEME, get_theme, normalize_theme_name
 
 APP_DIR_NAME = "kanban-tui"
 LEGACY_CONFIG_NAME = ".kanban-tui.yaml"
@@ -175,7 +175,7 @@ def validate_config(config, config_path: Path) -> AppConfig:
             f"Config file {config_path}: theme must be a string."
         )
     try:
-        theme = get_theme(raw_theme).name
+        theme = normalize_theme_name(raw_theme)
     except ValueError as exc:
         raise click.ClickException(f"Config file {config_path}: {exc}") from exc
 
