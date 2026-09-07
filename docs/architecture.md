@@ -28,6 +28,7 @@ Production code lives under `src/kanban_tui/`:
 - `themes.py` — semantic built-in palettes plus XDG/portable custom-theme discovery and YAML validation.
 - `transfer_format.py` — transport-neutral versioned board payload encoding and validation.
 - `transfer.py` — JSON file I/O and Click error translation for board transfer.
+- `http_api.py` — authenticated IPv4 loopback HTTP import adapter using the shared payload codec and application use case.
 - `rendering.py` — themed Rich table/history rendering plus plain/JSON views, filters and sorting.
 - `tui.py` — Textual full-screen UI using the same services, persistence layer and semantic theme palette as the CLI.
 
@@ -201,6 +202,8 @@ Complete transfer uses the distinct versioned `kanbanTUI-board` JSON envelope, v
 The JSON file adapter in `transfer.py` delegates payload conversion to that codec and owns only file I/O plus Click error translation. Other input adapters can use the same codec without importing Click. `BoardApplication.import_board()` owns merge/replace selection, deterministic remapping, policy validation and transactional commit. The CLI supplies only the decoded board, mode and display source, then translates a pure `PolicyViolation` into its Click error.
 
 `replace` preserves imported IDs. `merge` preserves non-conflicting IDs and deterministically remaps collisions against active or archived history. Export refuses destinations that resolve to the selected board's config file, datastore or datastore lock file.
+
+The local HTTP adapter and its wire contract are documented in [Local HTTP API](local-api.md). It is independently injectable; CLI startup is tracked separately in #102.
 
 ## TUI safety
 

@@ -1,0 +1,202 @@
+"""Authenticated loopback HTTP adapter for the board import use case."""
+
+import hmac
+import json
+from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlsplit
+
+from .application import BoardApplication, StoreError
+from .imports import ImportMode
+from .policy import BoardPolicy, PolicyViolation
+from .transfer_format import TransferFormatError, board_from_export
+
+MAX_BODY_BYTES = 1024 * 1024
+
+
+@dataclass(frozen=True)
+class ApiResponse:
+    status: int
+    body: dict[str, object]
+
+
+def error(status: int, code: str) -> ApiResponse:
+    return ApiResponse(status, {"error": {"code": code}})
+
+
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def _invalid_constant(value: str) -> None:
+    raise ValueError("Non-finite JSON number")
+
+
+class ImportApi:
+    """Socket-free controller; owns neither board selection nor persistence."""
+
+    def __init__(
+        self, application: BoardApplication, policy: BoardPolicy, *, token: str
+    ) -> None:
+        if not token or any(ord(char) < 33 or ord(char) > 126 for char in token):
+            raise ValueError(
+                "API token must be nonempty printable ASCII without spaces"
+            )
+        self.application = application
+        self.policy = policy
+        self._authorization = f"Bearer {token}".encode("ascii")
+
+    def authorized(self, authorization: str) -> bool:
+        return hmac.compare_digest(authorization.encode("utf-8"), self._authorization)
+
+    def import_payload(self, mode: str, body: bytes) -> ApiResponse:
+        if len(body) > MAX_BODY_BYTES:
+            return error(413, "payload_too_large")
+        try:
+            selected = ImportMode(mode)
+        except ValueError:
+            return error(400, "invalid_mode")
+        try:
+            payload = json.loads(
+                body.decode("utf-8"),
+                object_pairs_hook=_unique_object,
+                parse_constant=_invalid_constant,
+            )
+        except (ValueError, RecursionError):
+            return error(400, "invalid_json")
+        try:
+            imported = board_from_export(payload)
+        except TransferFormatError:
+            return error(400, "invalid_import_format")
+        try:
+            _, result = self.application.import_board(self.policy, imported, selected)
+        except PolicyViolation:
+            return error(422, "policy_violation")
+        except StoreError:
+            return error(503, "store_unavailable")
+        except Exception:
+            return error(500, "internal_error")
+        return ApiResponse(
+            200,
+            {
+                "status": "changed" if result.changed else "unchanged",
+                "mode": selected.value,
+                "changed": result.changed,
+                "unchanged": result.unchanged,
+                "id_mapping": {
+                    str(old): new
+                    for item in result.items
+                    for old, new in item.id_mapping
+                },
+            },
+        )
+
+
+def create_server(api: ImportApi, *, port: int = 0) -> HTTPServer:
+    """Bind exclusively to numeric IPv4 loopback; caller owns serve/close lifecycle."""
+    if isinstance(port, bool) or not isinstance(port, int) or not 0 <= port <= 65535:
+        raise ValueError("API port must be an integer between 0 and 65535")
+
+    class Handler(BaseHTTPRequestHandler):
+        # One request per connection avoids ambiguous body framing and pipelining.
+        protocol_version = "HTTP/1.0"
+
+        def setup(self) -> None:
+            self.request.settimeout(5)
+            super().setup()
+
+        def log_message(self, format: str, *args: object) -> None:
+            # Request targets and credentials must never enter terminal logs.
+            pass
+
+        def send_error(
+            self, code: int, message: str | None = None, explain: str | None = None
+        ) -> None:
+            self.respond(error(code, "invalid_request"))
+
+        def respond(self, response: ApiResponse) -> None:
+            data = json.dumps(response.body, separators=(",", ":")).encode("utf-8")
+            self.send_response(response.status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            if response.status == 401:
+                self.send_header("WWW-Authenticate", "Bearer")
+            self.end_headers()
+            self.close_connection = True
+            if self.command != "HEAD":
+                self.wfile.write(data)
+
+        def authenticated(self) -> bool:
+            headers = self.headers.get_all("Authorization", [])
+            if len(headers) != 1 or not api.authorized(headers[0]):
+                self.respond(error(401, "unauthorized"))
+                return False
+            return True
+
+        def do_GET(self) -> None:
+            if self.authenticated():
+                self.respond(
+                    ApiResponse(200, {"status": "ok"})
+                    if self.path == "/health"
+                    else error(404, "not_found")
+                )
+
+        def do_POST(self) -> None:
+            if not self.authenticated():
+                return
+            try:
+                target = urlsplit(self.path)
+                query = parse_qs(target.query, keep_blank_values=True, max_num_fields=2)
+            except ValueError:
+                self.respond(error(400, "invalid_request"))
+                return
+            if target.path != "/v1/board/import" or target.scheme or target.netloc:
+                self.respond(error(404, "not_found"))
+                return
+            if target.fragment or set(query) != {"mode"} or len(query["mode"]) != 1:
+                self.respond(error(400, "invalid_mode"))
+                return
+            if query["mode"][0] not in {"merge", "replace"}:
+                self.respond(error(400, "invalid_mode"))
+                return
+            types = self.headers.get_all("Content-Type", [])
+            if len(types) != 1 or self.headers.get_content_type() != "application/json":
+                self.respond(error(415, "unsupported_media_type"))
+                return
+            lengths = self.headers.get_all("Content-Length", [])
+            if (
+                self.headers.get_all("Transfer-Encoding")
+                or self.headers.get_all("Content-Encoding")
+                or len(lengths) != 1
+                or not lengths[0].isascii()
+                or not lengths[0].isdigit()
+                or len(lengths[0]) > 10
+            ):
+                self.respond(error(400, "invalid_framing"))
+                return
+            length = int(lengths[0])
+            if length > MAX_BODY_BYTES:
+                self.respond(error(413, "payload_too_large"))
+                return
+            try:
+                body = self.rfile.read(length)
+            except TimeoutError:
+                self.respond(error(408, "request_timeout"))
+                return
+            if len(body) != length:
+                self.respond(error(400, "incomplete_body"))
+                return
+            try:
+                response = api.import_payload(query["mode"][0], body)
+            except Exception:
+                response = error(500, "internal_error")
+            self.respond(response)
+
+    return HTTPServer(("127.0.0.1", port), Handler)
