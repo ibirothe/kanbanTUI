@@ -8,6 +8,7 @@ import pytest
 from kanban_tui.cli import main
 from kanban_tui.config import get_config_path
 from kanban_tui.models import Board, Task, TaskState
+from kanban_tui.policy import PolicyViolation, validate_imported_board
 from kanban_tui.storage import read_data
 from kanban_tui.transfer import (
     EXPORT_FORMAT,
@@ -16,8 +17,6 @@ from kanban_tui.transfer import (
     export_payload,
     merge_boards,
     read_export,
-    validate_board_capacity,
-    validate_imported_tasks,
     write_export,
 )
 
@@ -207,16 +206,16 @@ def test_import_capacity_is_validated_before_write(write_config):
         }
     )
 
-    with pytest.raises(click.ClickException, match="exceeds TODO limit"):
-        validate_board_capacity(config, imported)
+    with pytest.raises(PolicyViolation, match="exceeds TODO limit"):
+        validate_imported_board(config.policy, imported)
 
 
 def test_imported_task_text_must_respect_configured_limit(write_config):
     config = write_config(limits={"taskname": 4})
     imported = Board(active={1: task(1, TaskState.TODO, "too long")})
 
-    with pytest.raises(click.ClickException, match="text exceeds limit"):
-        validate_imported_tasks(config, imported)
+    with pytest.raises(PolicyViolation, match="text exceeds limit"):
+        validate_imported_board(config.policy, imported)
 
 
 def test_write_export_requires_force_for_existing_file(tmp_path):
@@ -282,6 +281,22 @@ def test_cli_import_rejects_overlong_task_without_mutating_board(
     assert result.exit_code != 0
     assert "text exceeds limit" in result.output
     assert list(read_data(config).active) == [1]
+
+
+def test_cli_translates_import_capacity_violation_without_mutating_board(
+    runner, write_config, tmp_path
+):
+    config = write_config(limits={"todo": 1})
+    runner.invoke(main, ["add", "current"])
+    original = config.data_path.read_bytes()
+    path = tmp_path / "over-capacity.json"
+    write_export(path, Board(active={2: task(2, TaskState.TODO, "incoming")}))
+
+    result = runner.invoke(main, ["import", str(path), "--mode", "merge"])
+
+    assert result.exit_code != 0
+    assert "exceeds TODO limit" in result.output
+    assert config.data_path.read_bytes() == original
 
 
 def test_cli_import_merge_remaps_conflicting_ids(runner, write_config, tmp_path):

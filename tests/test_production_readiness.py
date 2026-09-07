@@ -10,7 +10,7 @@ def test_non_positive_task_ids_are_invalid(write_config):
     config = write_config()
 
     delete_result = delete_tasks(Board(), ["0", "-1"])
-    restore_result = restore_tasks(config, Board(), ["0", "-1"])
+    restore_result = restore_tasks(config.policy, Board(), ["0", "-1"])
 
     assert delete_result.messages == [
         "Error: invalid task ID '0'.",

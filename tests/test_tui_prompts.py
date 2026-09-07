@@ -11,7 +11,7 @@ from kanban_tui.tui import KanbanApp, MutationPromptScreen
 
 def seed_board(config, *tasks: str) -> None:
     board = Board()
-    add_tasks(config, board, tasks)
+    add_tasks(config.policy, board, tasks)
     with datastore_lock(config):
         write_data(config, board)
 

@@ -14,6 +14,7 @@ from .config import (
     validate_board_name,
 )
 from .models import TaskPriority, TaskState, normalize_tag
+from .policy import PolicyViolation, validate_imported_board
 from .rendering import SORT_CHOICES, render_board, render_history
 from .resources import resolve_board_paths
 from .services import (
@@ -35,8 +36,6 @@ from .transactions import mutate_board, undo_board
 from .transfer import (
     merge_boards,
     read_export,
-    validate_board_capacity,
-    validate_imported_tasks,
     write_export,
 )
 
@@ -115,7 +114,7 @@ def _echo_messages(messages: list[str]) -> None:
 
 def _complete_operation(result: OperationResult, config) -> None:
     _echo_messages(result.messages)
-    if result.succeeded and config.repaint:
+    if result.succeeded and config.presentation.repaint:
         display()
     if result.failed:
         raise click.exceptions.Exit(1)
@@ -124,7 +123,8 @@ def _complete_operation(result: OperationResult, config) -> None:
 def _run_state_command(ids: tuple[str, ...], target_state: TaskState) -> None:
     config = _read_config()
     _, result = mutate_board(
-        config, lambda board: move_tasks_to_state(config, board, ids, target_state)
+        config,
+        lambda board: move_tasks_to_state(config.policy, board, ids, target_state),
     )
     _complete_operation(result, config)
 
@@ -243,7 +243,7 @@ def config_show():
     config = _read_config()
     click.echo(f"path: {path}")
     click.echo(f"data_path: {config.data_path}")
-    click.echo(f"theme: {config.theme}")
+    click.echo(f"theme: {config.presentation.theme}")
     click.echo(
         "limits.todo: "
         + (str(config.limits.todo) if config.limits.todo is not None else "unlimited")
@@ -252,9 +252,9 @@ def config_show():
         "limits.wip: "
         + (str(config.limits.wip) if config.limits.wip is not None else "unlimited")
     )
-    click.echo(f"limits.done: {config.limits.done}")
+    click.echo(f"limits.done: {config.presentation.done_limit}")
     click.echo(f"limits.taskname: {config.limits.taskname}")
-    click.echo(f"repaint: {'true' if config.repaint else 'false'}")
+    click.echo(f"repaint: {'true' if config.presentation.repaint else 'false'}")
 
 
 @config_commands.command(name="set")
@@ -307,7 +307,7 @@ def add(task_words, priority, tags):
     _, result = mutate_board(
         config,
         lambda board: add_tasks(
-            config, board, [task_text], priority=priority, tags=tags
+            config.policy, board, [task_text], priority=priority, tags=tags
         ),
     )
     _complete_operation(result, config)
@@ -321,7 +321,7 @@ def edit(task_id, task_words):
     config = _read_config()
     task_text = " ".join(task_words)
     _, result = mutate_board(
-        config, lambda board: edit_task(config, board, task_id, task_text)
+        config, lambda board: edit_task(config.policy, board, task_id, task_text)
     )
     _complete_operation(result, config)
 
@@ -392,7 +392,9 @@ def delete(ids):
 def restore(ids):
     """Restore archived tasks to TODO."""
     config = _read_config()
-    _, result = mutate_board(config, lambda board: restore_tasks(config, board, ids))
+    _, result = mutate_board(
+        config, lambda board: restore_tasks(config.policy, board, ids)
+    )
     _complete_operation(result, config)
 
 
@@ -422,7 +424,9 @@ def todo(ids):
 def promote(ids):
     """Advance tasks by one state."""
     config = _read_config()
-    _, result = mutate_board(config, lambda board: promote_tasks(config, board, ids))
+    _, result = mutate_board(
+        config, lambda board: promote_tasks(config.policy, board, ids)
+    )
     _complete_operation(result, config)
 
 
@@ -431,7 +435,9 @@ def promote(ids):
 def regress(ids):
     """Move tasks back by one state."""
     config = _read_config()
-    _, result = mutate_board(config, lambda board: regress_tasks(config, board, ids))
+    _, result = mutate_board(
+        config, lambda board: regress_tasks(config.policy, board, ids)
+    )
     _complete_operation(result, config)
 
 
@@ -480,7 +486,10 @@ def import_command(path, mode):
     """Import a complete board export."""
     imported = read_export(path)
     config = _read_config()
-    validate_imported_tasks(config, imported)
+    try:
+        validate_imported_board(config.policy, imported)
+    except PolicyViolation as exc:
+        raise click.ClickException(str(exc)) from exc
     mode_name = mode.lower()
     remapped: dict[int, int] = {}
 
@@ -493,7 +502,10 @@ def import_command(path, mode):
         if target == current:
             result.messages.append("Import produced no board changes.")
             return result
-        validate_board_capacity(config, target)
+        try:
+            validate_imported_board(config.policy, target)
+        except PolicyViolation as exc:
+            raise click.ClickException(str(exc)) from exc
         current.active, current.deleted = target.active, target.deleted
         result.success(f"Imported board from {path.resolve()} ({mode_name}).")
         if remapped:
@@ -507,7 +519,7 @@ def import_command(path, mode):
     _echo_messages(result.messages)
     if not result.succeeded:
         return
-    if config.repaint:
+    if config.presentation.repaint:
         display()
 
 
@@ -517,7 +529,7 @@ def undo():
     config = _read_config()
     undo_board(config)
     click.echo("Undid last board change.")
-    if config.repaint:
+    if config.presentation.repaint:
         display()
 
 

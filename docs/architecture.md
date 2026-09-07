@@ -14,7 +14,9 @@ Production code lives under `src/kanban_tui/`:
 - `config.py` — XDG/portable/legacy path resolution, named boards, presentation-independent YAML validation and atomic config writes.
 - `resources.py` — shared canonical config/datastore/lock paths and collision checks.
 - `models.py` — typed domain model and business invariants.
-- `services.py` — task mutations and workflow/capacity business rules.
+- `policy.py` — presentation-independent TODO/WIP capacity and task-text policy with pure domain errors.
+- `services.py` — task mutations depending only on the domain model and policy.
+- `settings.py` — compatible `AppConfig` composition of infrastructure, policy and presentation settings.
 - `atomic.py` — shared same-directory temporary-file lifecycle and cleanup.
 - `transactions.py` — shared lock/read/mutate/write and undo application boundaries.
 - `storage.py` — side-effect-free reads, cross-process writer locking, atomic YAML writes and undo.
@@ -37,7 +39,7 @@ Click's built-in shell completion protocol is used for Bash, Zsh and Fish. Choic
 For a mutation:
 
 1. The CLI or TUI resolves the selected configuration.
-2. `config.py` validates it into `AppConfig`, including the selected built-in or custom color theme.
+2. `config.py` validates it into the compatible `AppConfig` composition. `AppConfig.policy` maps only TODO/WIP and task-text limits into the immutable `BoardPolicy`; paths and presentation settings are not passed to services.
 3. `transactions.py` owns the mutation boundary and acquires the datastore writer lock through `storage.py`.
 4. The YAML datastore is decoded by `codec.py` into a validated `Board`. A missing datastore is represented as an empty board without creating files or printing output.
    Snapshot-dependent TUI commands then compare their task expectations against this current board while still holding the writer lock. A conflict returns the current board through `TaskConflict` before the operation or any write occurs.
@@ -89,6 +91,8 @@ Rich and Textual consume the same immutable `Theme` value. A TUI resolves it onc
 Plain and JSON formats contain no visual styling. Rich honors `NO_COLOR`, which disables ANSI color without changing the selected persistent theme.
 
 ## Domain invariants
+
+The domain boundary consists of `models.py`, `policy.py` and `services.py`. These modules do not import Click, PyYAML, Rich, Textual, themes, filesystem paths or application configuration. `models.py` enforces intrinsic validity; `BoardPolicy` supplies configured business limits; services receive that policy directly. The accepted dependency direction and follow-up boundaries are recorded in [ADR 0001](adr/0001-domain-boundaries.md).
 
 A `Task` has a positive integer ID, a supported state, non-empty text, timezone-aware creation/modification timestamps, a positive manual position, optional priority/tags, and an optional completion timestamp.
 
@@ -183,7 +187,7 @@ Each successful semantic mutation writes the new board and immediately previous 
 
 Complete transfer uses the distinct versioned `kanbanTUI-board` JSON envelope, version 1. It is not the datastore schema. Imports reject non-integer versions and unknown envelope or task fields. Exports include all active and archived tasks independent of view filters or DONE display limits.
 
-Imports are parsed into the validated domain model before persistence. Imported tasks must satisfy the selected board's `limits.taskname`, and the final candidate board must satisfy TODO/WIP capacities.
+Imports are parsed into the validated domain model before persistence. Pure policy validation applies the selected board's task-text and TODO/WIP limits to the candidate. The CLI adapter translates a `PolicyViolation` into its Click error without making the policy depend on Click.
 
 `replace` preserves imported IDs. `merge` preserves non-conflicting IDs and deterministically remaps collisions against active or archived history. Export refuses destinations that resolve to the selected board's config file, datastore or datastore lock file.
 

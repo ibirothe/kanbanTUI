@@ -2,10 +2,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
 from typing import Any
-
-from .themes import DEFAULT_THEME
 
 LEGACY_TIMESTAMP_FORMAT = "%Y-%b-%d %H:%M:%S"
 TAG_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
@@ -143,53 +140,6 @@ class Task:
         if isinstance(self.tags, str):
             raise ValueError("task tags must be a collection of strings")
         self.tags = tuple(sorted({normalize_tag(tag) for tag in self.tags}))
-
-
-@dataclass
-class Limits:
-    todo: int | None = None
-    wip: int | None = None
-    done: int = 10
-    taskname: int = 40
-
-    @classmethod
-    def from_mapping(cls, raw: Any) -> "Limits":
-        if raw is None:
-            raw = {}
-        if not isinstance(raw, dict):
-            raise ValueError("limits must be a mapping")
-
-        values: dict[str, int | None] = {
-            "todo": None,
-            "wip": None,
-            "done": 10,
-            "taskname": 40,
-        }
-        for name in values:
-            if name not in raw:
-                continue
-            try:
-                values[name] = _strict_integer(
-                    raw[name],
-                    minimum=0,
-                    error=f"limits.{name} must be a non-negative integer",
-                )
-            except ValueError as exc:
-                raise ValueError(
-                    f"limits.{name} must be a non-negative integer"
-                ) from exc
-
-        done, taskname = values["done"], values["taskname"]
-        assert done is not None and taskname is not None
-        return cls(todo=values["todo"], wip=values["wip"], done=done, taskname=taskname)
-
-
-@dataclass
-class AppConfig:
-    data_path: Path
-    limits: Limits = field(default_factory=Limits)
-    repaint: bool = False
-    theme: str = DEFAULT_THEME
 
 
 @dataclass

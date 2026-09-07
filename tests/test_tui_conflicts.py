@@ -28,7 +28,7 @@ async def test_conflicting_prompt_preserves_draft_and_requires_review(
         "kanban_tui.services.timestamp",
         lambda: datetime(2026, 9, 6, 12, 0, tzinfo=timezone.utc),
     )
-    mutate_board(config, lambda b: add_tasks(config, b, ["original"]))
+    mutate_board(config, lambda b: add_tasks(config.policy, b, ["original"]))
     app = KanbanApp(config)
     async with app.run_test(size=(60, 24)) as pilot:
         await pilot.press(key)
@@ -37,7 +37,7 @@ async def test_conflicting_prompt_preserves_draft_and_requires_review(
 
         def external(board):
             if key == "e":
-                return edit_task(config, board, "1", "external")
+                return edit_task(config.policy, board, "1", "external")
             return set_task_tags(board, "1", ["external"])
 
         mutate_board(config, external)
@@ -70,7 +70,7 @@ async def test_conflicting_prompt_preserves_draft_and_requires_review(
 @pytest.mark.parametrize("external_action", ["archive", "replace", "remove"])
 async def test_prompt_rejects_changed_task_identity(write_config, external_action):
     config = write_config()
-    mutate_board(config, lambda b: add_tasks(config, b, ["original"]))
+    mutate_board(config, lambda b: add_tasks(config.policy, b, ["original"]))
     app = KanbanApp(config)
     async with app.run_test() as pilot:
         await pilot.press("e")
@@ -83,7 +83,7 @@ async def test_prompt_rejects_changed_task_identity(write_config, external_actio
             board.active.clear()
             if external_action == "replace":
                 # Replace import may reuse a numeric ID for a different task.
-                return add_tasks(config, board, ["replacement"])
+                return add_tasks(config.policy, board, ["replacement"])
             return OperationResult(succeeded=1)
 
         mutate_board(config, external)
@@ -104,15 +104,15 @@ async def test_prompt_rejects_changed_task_identity(write_config, external_actio
 
 async def test_review_is_rechecked_before_commit(write_config):
     config = write_config()
-    mutate_board(config, lambda b: add_tasks(config, b, ["one"]))
+    mutate_board(config, lambda b: add_tasks(config.policy, b, ["one"]))
     app = KanbanApp(config)
     async with app.run_test() as pilot:
         await pilot.press("e")
         screen = app.screen
         screen.query_one(Input).value = "draft"
-        mutate_board(config, lambda b: edit_task(config, b, "1", "external one"))
+        mutate_board(config, lambda b: edit_task(config.policy, b, "1", "external one"))
         await pilot.press("enter", "ctrl+r")
-        mutate_board(config, lambda b: edit_task(config, b, "1", "external two"))
+        mutate_board(config, lambda b: edit_task(config.policy, b, "1", "external two"))
         original = config.data_path.read_bytes()
         await pilot.press("enter")
         assert app.screen is screen
@@ -123,7 +123,7 @@ async def test_review_is_rechecked_before_commit(write_config):
 
 async def test_relative_reorder_uses_current_neighbor(write_config):
     config = write_config()
-    mutate_board(config, lambda b: add_tasks(config, b, ["one", "two", "three"]))
+    mutate_board(config, lambda b: add_tasks(config.policy, b, ["one", "two", "three"]))
     app = KanbanApp(config)
     async with app.run_test() as pilot:
         await pilot.press("j")
@@ -145,12 +145,12 @@ async def test_relative_reorder_uses_current_neighbor(write_config):
 
 async def test_prompt_allows_unrelated_task_change(write_config):
     config = write_config()
-    mutate_board(config, lambda b: add_tasks(config, b, ["one", "two"]))
+    mutate_board(config, lambda b: add_tasks(config.policy, b, ["one", "two"]))
     app = KanbanApp(config)
     async with app.run_test() as pilot:
         await pilot.press("e")
         app.screen.query_one(Input).value = "edited one"
-        mutate_board(config, lambda b: edit_task(config, b, "2", "external two"))
+        mutate_board(config, lambda b: edit_task(config.policy, b, "2", "external two"))
         await pilot.press("enter")
         await pilot.pause()
         assert not isinstance(app.screen, PromptScreen)
@@ -162,7 +162,7 @@ async def test_prompt_allows_unrelated_task_change(write_config):
 
 async def test_unchanged_edit_prompt_closes_without_replacing_undo(write_config):
     config = write_config()
-    mutate_board(config, lambda b: add_tasks(config, b, ["same"]))
+    mutate_board(config, lambda b: add_tasks(config.policy, b, ["same"]))
     original = config.data_path.read_bytes()
     app = KanbanApp(config)
 
@@ -182,7 +182,7 @@ async def test_unchanged_edit_prompt_closes_without_replacing_undo(write_config)
 @pytest.mark.parametrize("key", ["p", "right", "d", "shift+up"])
 async def test_stale_shortcuts_reject_then_refresh(write_config, key):
     config = write_config()
-    mutate_board(config, lambda b: add_tasks(config, b, ["one", "two", "three"]))
+    mutate_board(config, lambda b: add_tasks(config.policy, b, ["one", "two", "three"]))
     app = KanbanApp(config)
     async with app.run_test() as pilot:
         await pilot.press("j")
@@ -192,10 +192,10 @@ async def test_stale_shortcuts_reject_then_refresh(write_config, key):
             if key == "p":
                 return set_task_priority(board, "2", TaskPriority.HIGH)
             if key == "right":
-                return move_tasks_to_state(config, board, ["2"], TaskState.DONE)
+                return move_tasks_to_state(config.policy, board, ["2"], TaskState.DONE)
             if key == "shift+up":
                 return reorder_task(board, "2", "bottom")
-            return edit_task(config, board, "2", "external")
+            return edit_task(config.policy, board, "2", "external")
 
         mutate_board(config, external)
         original = config.data_path.read_bytes()
@@ -208,7 +208,7 @@ async def test_stale_shortcuts_reject_then_refresh(write_config, key):
 
 async def test_archive_picker_rejects_replaced_entry(write_config):
     config = write_config()
-    mutate_board(config, lambda b: add_tasks(config, b, ["one"]))
+    mutate_board(config, lambda b: add_tasks(config.policy, b, ["one"]))
     mutate_board(config, lambda b: delete_tasks(b, ["1"]))
     app = KanbanApp(config)
     async with app.run_test() as pilot:

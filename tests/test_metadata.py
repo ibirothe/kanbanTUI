@@ -8,9 +8,7 @@ from textual.widgets import Input
 from kanban_tui.cli import main
 from kanban_tui.codec import decode_board, encode_board
 from kanban_tui.models import (
-    AppConfig,
     Board,
-    Limits,
     Task,
     TaskPriority,
     TaskState,
@@ -27,6 +25,7 @@ from kanban_tui.services import (
     set_task_tags,
     update_task_tag,
 )
+from kanban_tui.settings import AppConfig, Limits
 from kanban_tui.storage import datastore_lock, read_data, write_data
 from kanban_tui.transfer import board_from_export, export_payload
 from kanban_tui.tui import KanbanApp
@@ -175,7 +174,7 @@ def test_cli_priority_tags_filters_and_undo(runner, write_config):
 
 def seed_board(config_value: AppConfig) -> None:
     board = Board()
-    add_tasks(config_value, board, ["interactive"])
+    add_tasks(config_value.policy, board, ["interactive"])
     with datastore_lock(config_value):
         write_data(config_value, board)
 

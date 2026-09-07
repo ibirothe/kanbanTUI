@@ -95,7 +95,7 @@ def test_done_order_survives_later_text_priority_and_tag_changes(
     board = Board(active={1: first, 2: second})
 
     monkeypatch.setattr("kanban_tui.services.timestamp", lambda: T12)
-    assert edit_task(config, board, "1", "first edited").ok
+    assert edit_task(config.policy, board, "1", "first edited").ok
     assert set_task_priority(board, "1", TaskPriority.URGENT).ok
     assert set_task_tags(board, "1", ["changed"]).ok
 
@@ -110,12 +110,12 @@ def test_leaving_and_reentering_done_refreshes_completion_time(write_config):
         active={1: Task(1, TaskState.DONE, "task", T10, T09, completed_at=T10)}
     )
     assert move_tasks_to_state(
-        config, board, ["1"], TaskState.TODO, clock=lambda: T11
+        config.policy, board, ["1"], TaskState.TODO, clock=lambda: T11
     ).ok
     assert board.active[1].completed_at is None
 
     assert move_tasks_to_state(
-        config, board, ["1"], TaskState.DONE, clock=lambda: T12
+        config.policy, board, ["1"], TaskState.DONE, clock=lambda: T12
     ).ok
     assert board.active[1].completed_at == T12
 
@@ -124,18 +124,20 @@ def test_undo_restores_precise_done_order(write_config):
     config = write_config()
     mutate_board(
         config,
-        lambda board: add_tasks(config, board, ["later", "earlier"], clock=lambda: T09),
-    )
-    mutate_board(
-        config,
-        lambda board: move_tasks_to_state(
-            config, board, ["2"], TaskState.DONE, clock=lambda: T10_EARLY
+        lambda board: add_tasks(
+            config.policy, board, ["later", "earlier"], clock=lambda: T09
         ),
     )
     mutate_board(
         config,
         lambda board: move_tasks_to_state(
-            config, board, ["1"], TaskState.DONE, clock=lambda: T10_LATE
+            config.policy, board, ["2"], TaskState.DONE, clock=lambda: T10_EARLY
+        ),
+    )
+    mutate_board(
+        config,
+        lambda board: move_tasks_to_state(
+            config.policy, board, ["1"], TaskState.DONE, clock=lambda: T10_LATE
         ),
     )
     mutate_board(
