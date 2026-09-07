@@ -4,8 +4,8 @@ import pytest
 from textual.widgets import Input, Static
 
 from kanban_tui.models import TaskPriority, TaskState
+from kanban_tui.results import OperationCode, OperationResult
 from kanban_tui.services import (
-    OperationResult,
     add_tasks,
     delete_tasks,
     edit_task,
@@ -17,6 +17,12 @@ from kanban_tui.services import (
 from kanban_tui.storage import read_data
 from kanban_tui.transactions import mutate_board, undo_board
 from kanban_tui.tui import ArchiveScreen, KanbanApp, PromptScreen
+
+
+def changed_result() -> OperationResult:
+    result = OperationResult()
+    result.change(OperationCode.TASK_UPDATED)
+    return result
 
 
 @pytest.mark.parametrize("key", ["e", "t"])
@@ -84,7 +90,7 @@ async def test_prompt_rejects_changed_task_identity(write_config, external_actio
             if external_action == "replace":
                 # Replace import may reuse a numeric ID for a different task.
                 return add_tasks(config.policy, board, ["replacement"])
-            return OperationResult(succeeded=1)
+            return changed_result()
 
         mutate_board(config, external)
         original = config.data_path.read_bytes()
@@ -131,7 +137,7 @@ async def test_relative_reorder_uses_current_neighbor(write_config):
         def external(board):
             # A replace/import can change the neighbors while task #2 is unchanged.
             board.active[1].position, board.active[3].position = 3, 1
-            return OperationResult(succeeded=1)
+            return changed_result()
 
         mutate_board(config, external)
         await pilot.press("shift+up")
@@ -217,7 +223,7 @@ async def test_archive_picker_rejects_replaced_entry(write_config):
 
         def external(board):
             board.deleted[1].text = "replaced archive"
-            return OperationResult(succeeded=1)
+            return changed_result()
 
         mutate_board(config, external)
         original = config.data_path.read_bytes()

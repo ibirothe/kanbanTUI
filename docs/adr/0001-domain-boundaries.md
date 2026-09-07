@@ -19,7 +19,7 @@ The dependency direction is:
 
 TODO/WIP capacity and task-text length are domain policy. DONE display count, repaint and theme are presentation settings. The datastore path is infrastructure configuration. Import parsing remains in the JSON adapter; policy validation of the resulting board is pure.
 
-No interface is introduced for data classes. Store and transaction ports belong to the subsequent application-layer change tracked in issue #78; typed operation-result DTOs belong to issue #79.
+No interface is introduced for data classes. Store and transaction ports belong to the subsequent application-layer change tracked in issue #78. Typed operation-result DTOs were deferred to issue #79 and are now specified by [ADR 0002](0002-typed-operation-results.md).
 
 ## Consequences
 

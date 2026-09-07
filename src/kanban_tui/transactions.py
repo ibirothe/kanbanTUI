@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from .models import Board, Task, TaskPriority, TaskState
-from .services import OperationResult
+from .results import OperationCode, OperationResult
 from .settings import AppConfig
 from .storage import datastore_lock, read_data, undo_last_change, write_data
 
@@ -53,9 +53,8 @@ class TaskConflict(Exception):
     def __init__(self, board: Board, task_id: int) -> None:
         self.board = board
         self.task_id = task_id
-        super().__init__(
-            f"Conflict: task #{task_id} changed or is no longer available."
-        )
+        self.code = OperationCode.TASK_CONFLICT
+        super().__init__(task_id)
 
 
 def mutate_board(
@@ -71,7 +70,7 @@ def mutate_board(
                 raise TaskConflict(board, expected.task_id)
         previous = deepcopy(board)
         result = operation(board)
-        if result.succeeded and board != previous:
+        if result.changed and board != previous:
             write_data(config, board, previous=previous)
         else:
             board = previous

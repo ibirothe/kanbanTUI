@@ -14,11 +14,12 @@ from .config import (
     validate_board_name,
 )
 from .models import TaskPriority, TaskState, normalize_tag
+from .operation_messages import format_operation
 from .policy import PolicyViolation, validate_imported_board
 from .rendering import SORT_CHOICES, render_board, render_history
 from .resources import resolve_board_paths
+from .results import OperationCode, OperationResult, OperationStatus
 from .services import (
-    OperationResult,
     add_tasks,
     delete_tasks,
     edit_task,
@@ -107,16 +108,19 @@ def _complete_board_name(ctx, param, incomplete):
     return [name for name in list_named_boards() if name.casefold().startswith(prefix)]
 
 
-def _echo_messages(messages: list[str]) -> None:
-    for message in messages:
-        click.echo(message)
+def _echo_result(result: OperationResult) -> None:
+    for item in result.items:
+        click.echo(
+            format_operation(item),
+            err=item.status is OperationStatus.REJECTED,
+        )
 
 
 def _complete_operation(result: OperationResult, config) -> None:
-    _echo_messages(result.messages)
-    if result.succeeded and config.presentation.repaint:
+    _echo_result(result)
+    if result.changed and config.presentation.repaint:
         display()
-    if result.failed:
+    if result.rejected:
         raise click.exceptions.Exit(1)
 
 
@@ -500,24 +504,28 @@ def import_command(path, mode):
             target, remapped = merge_boards(current, imported)
         result = OperationResult()
         if target == current:
-            result.messages.append("Import produced no board changes.")
+            result.no_change(OperationCode.IMPORT_UNCHANGED)
             return result
         try:
             validate_imported_board(config.policy, target)
         except PolicyViolation as exc:
             raise click.ClickException(str(exc)) from exc
         current.active, current.deleted = target.active, target.deleted
-        result.success(f"Imported board from {path.resolve()} ({mode_name}).")
+        result.change(
+            OperationCode.IMPORT_COMPLETED,
+            text=str(path.resolve()),
+            action=mode_name,
+        )
         if remapped:
             mapping = ", ".join(
                 f"#{old_id}->#{new_id}" for old_id, new_id in sorted(remapped.items())
             )
-            result.messages.append(f"Remapped task IDs: {mapping}")
+            result.no_change(OperationCode.IDS_REMAPPED, text=mapping)
         return result
 
     _, result = mutate_board(config, apply_import)
-    _echo_messages(result.messages)
-    if not result.succeeded:
+    _echo_result(result)
+    if not result.changed:
         return
     if config.presentation.repaint:
         display()

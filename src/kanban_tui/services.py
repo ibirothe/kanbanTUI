@@ -1,5 +1,4 @@
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
 from datetime import datetime
 
 from .models import (
@@ -10,25 +9,7 @@ from .models import (
     normalize_tag,
 )
 from .policy import BoardPolicy, count_state
-
-
-@dataclass
-class OperationResult:
-    messages: list[str] = field(default_factory=list)
-    succeeded: int = 0
-    failed: int = 0
-
-    @property
-    def ok(self) -> bool:
-        return self.failed == 0
-
-    def success(self, message: str) -> None:
-        self.succeeded += 1
-        self.messages.append(message)
-
-    def failure(self, message: str) -> None:
-        self.failed += 1
-        self.messages.append(message)
+from .results import OperationCode, OperationItem, OperationResult, OperationStatus
 
 
 def timestamp() -> datetime:
@@ -59,51 +40,104 @@ def todo_limit_reached(policy: BoardPolicy, board: Board) -> bool:
     return state_limit_reached(policy, board, TaskState.TODO)
 
 
-def _state_name(state: TaskState) -> str:
-    if state is TaskState.IN_PROGRESS:
-        return "IN PROGRESS"
-    return str(state.value).upper()
-
-
-def _capacity_error(policy: BoardPolicy, board: Board, state: TaskState) -> str:
+def _capacity_rejection(
+    policy: BoardPolicy,
+    board: Board,
+    state: TaskState,
+    *,
+    task_id: int | None = None,
+    text: str | None = None,
+) -> OperationItem:
     limit = _state_limit(policy, state)
     count = count_state(board, state)
-    label = "WIP" if state is TaskState.IN_PROGRESS else "TODO"
-    return f"Error: {label} limit reached ({count}/{limit})."
+    return OperationItem(
+        OperationCode.STATE_LIMIT_REACHED,
+        OperationStatus.REJECTED,
+        task_id=task_id,
+        text=text,
+        state=state,
+        count=count,
+        limit=limit,
+    )
 
 
 def _validate_task_text(
     policy: BoardPolicy, raw_text: str
-) -> tuple[str | None, str | None]:
+) -> tuple[str | None, OperationItem | None]:
     text = raw_text.strip()
     if not text:
-        return None, "Error: task text cannot be empty."
+        return None, OperationItem(
+            OperationCode.TEXT_EMPTY, OperationStatus.REJECTED, text=raw_text
+        )
     if len(text) > policy.task_text_limit:
         return (
             None,
-            f"Error: task text exceeds limit ({len(text)}/{policy.task_text_limit} characters).",
+            OperationItem(
+                OperationCode.TEXT_TOO_LONG,
+                OperationStatus.REJECTED,
+                text=text,
+                count=len(text),
+                limit=policy.task_text_limit,
+            ),
         )
     return text, None
 
 
-def _parse_task_id(task_id: str) -> tuple[int | None, str | None]:
+def _normalize_tags(
+    tags: Iterable[object], *, task_id: int | None = None
+) -> tuple[tuple[str, ...] | None, OperationItem | None]:
+    normalized: set[str] = set()
+    for raw_tag in tags:
+        if not isinstance(raw_tag, str):
+            return None, OperationItem(
+                OperationCode.INVALID_TAG_TYPE,
+                OperationStatus.REJECTED,
+                task_id=task_id,
+            )
+        try:
+            normalized.add(normalize_tag(raw_tag))
+        except ValueError:
+            return None, OperationItem(
+                OperationCode.INVALID_TAG_FORMAT,
+                OperationStatus.REJECTED,
+                task_id=task_id,
+                text=raw_tag,
+            )
+    return tuple(sorted(normalized)), None
+
+
+def _parse_task_id(task_id: str) -> tuple[int | None, OperationItem | None]:
     try:
         numeric_id = int(task_id)
     except (TypeError, ValueError):
-        return None, f"Error: invalid task ID {task_id!r}."
+        return None, OperationItem(
+            OperationCode.INVALID_TASK_ID,
+            OperationStatus.REJECTED,
+            raw_id=task_id,
+        )
     if numeric_id < 1:
-        return None, f"Error: invalid task ID {task_id!r}."
+        return None, OperationItem(
+            OperationCode.INVALID_TASK_ID,
+            OperationStatus.REJECTED,
+            raw_id=task_id,
+        )
     return numeric_id, None
 
 
-def _active_task(board: Board, task_id: str) -> tuple[Task | None, str | None]:
+def _active_task(
+    board: Board, task_id: str
+) -> tuple[Task | None, OperationItem | None]:
     numeric_id, error = _parse_task_id(task_id)
     if error is not None:
         return None, error
     assert numeric_id is not None
     task = board.active.get(numeric_id)
     if task is None:
-        return None, f"Error: task #{numeric_id} does not exist."
+        return None, OperationItem(
+            OperationCode.TASK_NOT_FOUND,
+            OperationStatus.REJECTED,
+            task_id=numeric_id,
+        )
     return task, None
 
 
@@ -118,11 +152,16 @@ def _transition_task(
     task: Task,
     target_state: TaskState,
     clock: Clock | None,
-) -> str | None:
+) -> OperationItem | None:
     if task.state is target_state:
-        return f"Error: task #{task.id} is already {_state_name(target_state)}."
+        return OperationItem(
+            OperationCode.TASK_ALREADY_IN_STATE,
+            OperationStatus.UNCHANGED,
+            task_id=task.id,
+            state=target_state,
+        )
     if state_limit_reached(policy, board, target_state):
-        return _capacity_error(policy, board, target_state)
+        return _capacity_rejection(policy, board, target_state, task_id=task.id)
 
     previous_state = task.state
     now = _now(clock)
@@ -153,20 +192,26 @@ def add_tasks(
 
     try:
         normalized_priority = TaskPriority(priority) if priority is not None else None
-        normalized_tags = tuple(sorted({normalize_tag(tag) for tag in tags}))
-    except ValueError as exc:
-        result.failure(f"Error: {exc}.")
+    except ValueError:
+        result.reject(OperationCode.INVALID_PRIORITY, text=str(priority))
         return result
+    normalized_tags, tag_error = _normalize_tags(tags)
+    if tag_error is not None:
+        result.items.append(tag_error)
+        return result
+    assert normalized_tags is not None
 
     for raw_text in tasks:
         text, error = _validate_task_text(policy, raw_text)
         if error is not None:
-            result.failure(error)
+            result.items.append(error)
             continue
         assert text is not None
 
         if todo_limit_reached(policy, board):
-            result.failure(_capacity_error(policy, board, TaskState.TODO))
+            result.items.append(
+                _capacity_rejection(policy, board, TaskState.TODO, text=text)
+            )
             continue
 
         task_id = board.next_task_id()
@@ -181,7 +226,7 @@ def add_tasks(
             priority=normalized_priority,
             tags=normalized_tags,
         )
-        result.success(f"Added #{task_id}: {text}")
+        result.change(OperationCode.TASK_ADDED, task_id=task_id, text=text)
 
     return result
 
@@ -197,32 +242,32 @@ def edit_task(
     result = OperationResult()
     numeric_id, error = _parse_task_id(task_id)
     if error is not None:
-        result.failure(error)
+        result.items.append(error)
         return result
     assert numeric_id is not None
 
     if numeric_id in board.deleted:
-        result.failure(f"Error: archived task #{numeric_id} cannot be edited.")
+        result.reject(OperationCode.ARCHIVED_TASK_NOT_EDITABLE, task_id=numeric_id)
         return result
 
     task = board.active.get(numeric_id)
     if task is None:
-        result.failure(f"Error: task #{numeric_id} does not exist.")
+        result.reject(OperationCode.TASK_NOT_FOUND, task_id=numeric_id)
         return result
 
     text, error = _validate_task_text(policy, raw_text)
     if error is not None:
-        result.failure(error)
+        result.items.append(error)
         return result
     assert text is not None
 
     if task.text == text:
-        result.success(f"Task #{numeric_id} is unchanged.")
+        result.no_change(OperationCode.TASK_UNCHANGED, task_id=numeric_id)
         return result
 
     task.text = text
     task.modified_at = _now(clock)
-    result.success(f"Updated #{numeric_id}: {text}")
+    result.change(OperationCode.TASK_UPDATED, task_id=numeric_id, text=text)
     return result
 
 
@@ -233,7 +278,7 @@ def delete_tasks(
     for task_id in ids:
         task, error = _active_task(board, task_id)
         if error is not None:
-            result.failure(error)
+            result.items.append(error)
             continue
         assert task is not None
 
@@ -243,7 +288,7 @@ def delete_tasks(
         board.deleted[task.id] = task
         board.active.pop(task.id)
         board.normalize_positions(previous_state)
-        result.success(f"Archived #{task.id}.")
+        result.change(OperationCode.TASK_ARCHIVED, task_id=task.id)
 
     return result
 
@@ -259,21 +304,23 @@ def restore_tasks(
     for task_id in ids:
         numeric_id, error = _parse_task_id(task_id)
         if error is not None:
-            result.failure(error)
+            result.items.append(error)
             continue
         assert numeric_id is not None
 
         if numeric_id in board.active:
-            result.failure(f"Error: task #{numeric_id} is already active.")
+            result.no_change(OperationCode.TASK_ALREADY_ACTIVE, task_id=numeric_id)
             continue
 
         task = board.deleted.get(numeric_id)
         if task is None:
-            result.failure(f"Error: archived task #{numeric_id} does not exist.")
+            result.reject(OperationCode.ARCHIVED_TASK_NOT_FOUND, task_id=numeric_id)
             continue
 
         if todo_limit_reached(policy, board):
-            result.failure(_capacity_error(policy, board, TaskState.TODO))
+            result.items.append(
+                _capacity_rejection(policy, board, TaskState.TODO, task_id=numeric_id)
+            )
             continue
 
         _place_at_bottom(board, task, TaskState.TODO)
@@ -281,7 +328,7 @@ def restore_tasks(
         task.modified_at = _now(clock)
         board.active[numeric_id] = task
         board.deleted.pop(numeric_id)
-        result.success(f"Restored #{numeric_id} to TODO.")
+        result.change(OperationCode.TASK_RESTORED, task_id=numeric_id)
 
     return result
 
@@ -299,21 +346,23 @@ def move_tasks_to_state(
     for task_id in ids:
         task, error = _active_task(board, task_id)
         if error is not None:
-            result.failure(error)
+            result.items.append(error)
             continue
         assert task is not None
 
         error = _transition_task(policy, board, task, target_state, clock)
         if error is not None:
-            result.failure(error)
+            result.items.append(error)
             continue
 
         if target_state is TaskState.IN_PROGRESS:
-            result.success(f"Started #{task.id}.")
+            result.change(OperationCode.TASK_STARTED, task_id=task.id)
         elif target_state is TaskState.DONE:
-            result.success(f"Completed #{task.id}.")
+            result.change(OperationCode.TASK_COMPLETED, task_id=task.id)
         else:
-            result.success(f"Moved #{task.id} to TODO.")
+            result.change(
+                OperationCode.TASK_MOVED, task_id=task.id, state=TaskState.TODO
+            )
     return result
 
 
@@ -328,25 +377,29 @@ def promote_tasks(
     for task_id in ids:
         task, error = _active_task(board, task_id)
         if error is not None:
-            result.failure(error)
+            result.items.append(error)
             continue
         assert task is not None
 
         if task.state is TaskState.TODO:
             target_state = TaskState.IN_PROGRESS
-            success_message = f"Started #{task.id}."
+            success_code = OperationCode.TASK_STARTED
         elif task.state is TaskState.IN_PROGRESS:
             target_state = TaskState.DONE
-            success_message = f"Completed #{task.id}."
+            success_code = OperationCode.TASK_COMPLETED
         else:
-            result.failure(f"Error: task #{task.id} is already DONE.")
+            result.no_change(
+                OperationCode.TASK_ALREADY_IN_STATE,
+                task_id=task.id,
+                state=TaskState.DONE,
+            )
             continue
 
         error = _transition_task(policy, board, task, target_state, clock)
         if error is not None:
-            result.failure(error)
+            result.items.append(error)
         else:
-            result.success(success_message)
+            result.change(success_code, task_id=task.id)
 
     return result
 
@@ -362,25 +415,27 @@ def regress_tasks(
     for task_id in ids:
         task, error = _active_task(board, task_id)
         if error is not None:
-            result.failure(error)
+            result.items.append(error)
             continue
         assert task is not None
 
         if task.state is TaskState.DONE:
             target_state = TaskState.IN_PROGRESS
-            success_message = f"Moved #{task.id} to IN PROGRESS."
         elif task.state is TaskState.IN_PROGRESS:
             target_state = TaskState.TODO
-            success_message = f"Moved #{task.id} to TODO."
         else:
-            result.failure(f"Error: task #{task.id} is already TODO.")
+            result.no_change(
+                OperationCode.TASK_ALREADY_IN_STATE,
+                task_id=task.id,
+                state=TaskState.TODO,
+            )
             continue
 
         error = _transition_task(policy, board, task, target_state, clock)
         if error is not None:
-            result.failure(error)
+            result.items.append(error)
         else:
-            result.success(success_message)
+            result.change(OperationCode.TASK_MOVED, task_id=task.id, state=target_state)
 
     return result
 
@@ -397,12 +452,12 @@ def reorder_task(
     result = OperationResult()
     task, error = _active_task(board, task_id)
     if error is not None:
-        result.failure(error)
+        result.items.append(error)
         return result
     assert task is not None
 
     if task.state is TaskState.DONE:
-        result.failure("Error: completed tasks are ordered by completion time.")
+        result.reject(OperationCode.DONE_ORDER_FIXED, task_id=task.id)
         return result
 
     current_order = board.ordered_tasks(task.state)
@@ -411,33 +466,44 @@ def reorder_task(
         for index, candidate in enumerate(current_order)
         if candidate.id == task.id
     )
+    result_reference_id: int | None = None
 
     if target == "top":
         if current_index == 0:
-            result.failure(f"Error: task #{task.id} is already at top.")
+            result.no_change(
+                OperationCode.TASK_ALREADY_AT_POSITION,
+                task_id=task.id,
+                target=target,
+            )
             return result
         insert_at = 0
-        success_message = f"Moved #{task.id} to top."
     elif target == "bottom":
         if current_index == len(current_order) - 1:
-            result.failure(f"Error: task #{task.id} is already at bottom.")
+            result.no_change(
+                OperationCode.TASK_ALREADY_AT_POSITION,
+                task_id=task.id,
+                target=target,
+            )
             return result
         insert_at = len(current_order) - 1
-        success_message = f"Moved #{task.id} to bottom."
     elif target in {"before", "after"}:
         if reference_id is None:
-            result.failure(f"Error: {target} requires a reference task ID.")
+            result.reject(OperationCode.REFERENCE_REQUIRED, target=target)
             return result
         reference, reference_error = _active_task(board, reference_id)
         if reference_error is not None:
-            result.failure(reference_error)
+            result.items.append(reference_error)
             return result
         assert reference is not None
         if reference.id == task.id:
-            result.failure("Error: a task cannot be positioned relative to itself.")
+            result.reject(OperationCode.SELF_REFERENCE, task_id=task.id)
             return result
         if reference.state is not task.state:
-            result.failure("Error: reference task must be in the same column.")
+            result.reject(
+                OperationCode.REFERENCE_DIFFERENT_STATE,
+                task_id=task.id,
+                reference_id=reference.id,
+            )
             return result
 
         reference_current_index = next(
@@ -446,10 +512,20 @@ def reorder_task(
             if candidate.id == reference.id
         )
         if target == "before" and current_index + 1 == reference_current_index:
-            result.failure(f"Error: task #{task.id} is already before #{reference.id}.")
+            result.no_change(
+                OperationCode.TASK_ALREADY_RELATIVE,
+                task_id=task.id,
+                target=target,
+                reference_id=reference.id,
+            )
             return result
         if target == "after" and reference_current_index + 1 == current_index:
-            result.failure(f"Error: task #{task.id} is already after #{reference.id}.")
+            result.no_change(
+                OperationCode.TASK_ALREADY_RELATIVE,
+                task_id=task.id,
+                target=target,
+                reference_id=reference.id,
+            )
             return result
 
         ordered_without_task = [
@@ -461,9 +537,9 @@ def reorder_task(
             if candidate.id == reference.id
         )
         insert_at = reference_index if target == "before" else reference_index + 1
-        success_message = f"Moved #{task.id} {target} #{reference.id}."
+        result_reference_id = reference.id
     else:
-        result.failure("Error: position must be top, bottom, before, or after.")
+        result.reject(OperationCode.INVALID_POSITION, target=target)
         return result
 
     ordered = [candidate for candidate in current_order if candidate.id != task.id]
@@ -471,7 +547,12 @@ def reorder_task(
     for position, candidate in enumerate(ordered, start=1):
         candidate.position = position
     task.modified_at = _now(clock)
-    result.success(success_message)
+    result.change(
+        OperationCode.TASK_REORDERED,
+        task_id=task.id,
+        target=target,
+        reference_id=result_reference_id,
+    )
     return result
 
 
@@ -486,20 +567,20 @@ def reorder_task_relative(
     result = OperationResult()
     task, error = _active_task(board, task_id)
     if error is not None:
-        result.failure(error)
+        result.items.append(error)
         return result
     assert task is not None
     if delta not in {-1, 1}:
-        result.failure("Error: relative position must be -1 or 1.")
+        result.reject(OperationCode.INVALID_DELTA, task_id=task.id)
         return result
     if task.state is TaskState.DONE:
-        result.failure("Error: completed tasks are ordered by completion time.")
+        result.reject(OperationCode.DONE_ORDER_FIXED, task_id=task.id)
         return result
     ordered = board.ordered_tasks(task.state)
     index = next(i for i, candidate in enumerate(ordered) if candidate.id == task.id)
     neighbor_index = index + delta
     if not 0 <= neighbor_index < len(ordered):
-        result.failure("Task is already at the edge of the column.")
+        result.no_change(OperationCode.COLUMN_EDGE, task_id=task.id)
         return result
     return reorder_task(
         board,
@@ -521,7 +602,7 @@ def set_task_priority(
     result = OperationResult()
     task, error = _active_task(board, task_id)
     if error is not None:
-        result.failure(error)
+        result.items.append(error)
         return result
     assert task is not None
 
@@ -534,20 +615,23 @@ def set_task_priority(
         try:
             normalized = TaskPriority(priority)
         except ValueError:
-            result.failure(f"Error: invalid priority {priority!r}.")
+            result.reject(OperationCode.INVALID_PRIORITY, text=str(priority))
             return result
 
     if task.priority is normalized:
-        label = normalized.value if normalized is not None else "none"
-        result.failure(f"Error: task #{task.id} priority is already {label}.")
+        result.no_change(
+            OperationCode.PRIORITY_UNCHANGED,
+            task_id=task.id,
+            priority=normalized,
+        )
         return result
 
     task.priority = normalized
     task.modified_at = _now(clock)
     if normalized is None:
-        result.success(f"Cleared priority for #{task.id}.")
+        result.change(OperationCode.PRIORITY_CLEARED, task_id=task.id)
     else:
-        result.success(f"Set #{task.id} priority to {normalized.value}.")
+        result.change(OperationCode.PRIORITY_SET, task_id=task.id, priority=normalized)
     return result
 
 
@@ -562,26 +646,26 @@ def set_task_tags(
     result = OperationResult()
     task, error = _active_task(board, task_id)
     if error is not None:
-        result.failure(error)
+        result.items.append(error)
         return result
     assert task is not None
 
-    try:
-        normalized = tuple(sorted({normalize_tag(tag) for tag in tags}))
-    except ValueError as exc:
-        result.failure(f"Error: {exc}.")
+    normalized, tag_error = _normalize_tags(tags, task_id=task.id)
+    if tag_error is not None:
+        result.items.append(tag_error)
         return result
+    assert normalized is not None
 
     if task.tags == normalized:
-        result.failure(f"Error: task #{task.id} tags are unchanged.")
+        result.no_change(OperationCode.TAGS_UNCHANGED, task_id=task.id)
         return result
 
     task.tags = normalized
     task.modified_at = _now(clock)
     if normalized:
-        result.success(f"Set #{task.id} tags: {', '.join(normalized)}.")
+        result.change(OperationCode.TAGS_SET, task_id=task.id, tags=normalized)
     else:
-        result.success(f"Cleared tags for #{task.id}.")
+        result.change(OperationCode.TAGS_CLEARED, task_id=task.id)
     return result
 
 
@@ -597,41 +681,43 @@ def update_task_tag(
     result = OperationResult()
     task, error = _active_task(board, task_id)
     if error is not None:
-        result.failure(error)
+        result.items.append(error)
         return result
     assert task is not None
 
     if action == "clear":
         return set_task_tags(board, task_id, [], clock=clock)
     if raw_tag is None:
-        result.failure(f"Error: tag {action} requires a tag value.")
+        result.reject(OperationCode.TAG_REQUIRED, task_id=task.id, action=action)
         return result
 
-    try:
-        tag = normalize_tag(raw_tag)
-    except ValueError as exc:
-        result.failure(f"Error: {exc}.")
+    normalized, tag_error = _normalize_tags([raw_tag], task_id=task.id)
+    if tag_error is not None:
+        result.items.append(tag_error)
         return result
+    assert normalized is not None
+    tag = normalized[0]
 
     tags = set(task.tags)
     if action == "add":
         if tag in tags:
-            result.failure(f"Error: task #{task.id} already has tag #{tag}.")
+            result.no_change(OperationCode.TAG_PRESENT, task_id=task.id, text=tag)
             return result
         tags.add(tag)
     elif action == "remove":
         if tag not in tags:
-            result.failure(f"Error: task #{task.id} does not have tag #{tag}.")
+            result.no_change(OperationCode.TAG_MISSING, task_id=task.id, text=tag)
             return result
         tags.remove(tag)
     else:
-        result.failure("Error: tag action must be add, remove, or clear.")
+        result.reject(OperationCode.INVALID_TAG_ACTION, task_id=task.id, action=action)
         return result
 
     task.tags = tuple(sorted(tags))
     task.modified_at = _now(clock)
-    verb = "Added" if action == "add" else "Removed"
-    result.success(
-        f"{verb} tag #{tag} {'to' if action == 'add' else 'from'} #{task.id}."
+    result.change(
+        OperationCode.TAG_ADDED if action == "add" else OperationCode.TAG_REMOVED,
+        task_id=task.id,
+        text=tag,
     )
     return result

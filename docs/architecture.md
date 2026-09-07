@@ -15,7 +15,9 @@ Production code lives under `src/kanban_tui/`:
 - `resources.py` — shared canonical config/datastore/lock paths and collision checks.
 - `models.py` — typed domain model and business invariants.
 - `policy.py` — presentation-independent TODO/WIP capacity and task-text policy with pure domain errors.
-- `services.py` — task mutations depending only on the domain model and policy.
+- `results.py` — typed per-item operation codes, parameters and statuses.
+- `services.py` — task mutations returning typed results and depending only on the domain model, policy and result contract.
+- `operation_messages.py` — English terminal presentation for operation results.
 - `settings.py` — compatible `AppConfig` composition of infrastructure, policy and presentation settings.
 - `atomic.py` — shared same-directory temporary-file lifecycle and cleanup.
 - `transactions.py` — shared lock/read/mutate/write and undo application boundaries.
@@ -43,11 +45,15 @@ For a mutation:
 3. `transactions.py` owns the mutation boundary and acquires the datastore writer lock through `storage.py`.
 4. The YAML datastore is decoded by `codec.py` into a validated `Board`. A missing datastore is represented as an empty board without creating files or printing output.
    Snapshot-dependent TUI commands then compare their task expectations against this current board while still holding the writer lock. A conflict returns the current board through `TaskConflict` before the operation or any write occurs.
-5. The transaction captures a detached pre-mutation board; `services.py` applies the operation and returns `OperationResult`.
-6. Only a successful semantic mutation writes the datastore.
+5. The transaction captures a detached pre-mutation board; `services.py` applies the operation and returns an `OperationResult` containing ordered per-item outcomes.
+6. Only outcomes with status `changed` can write the datastore. `unchanged` outcomes are accepted no-ops; `rejected` outcomes identify domain validation failures. The transaction still compares complete board state before committing.
 7. The captured previous board is stored as the single `_undo` snapshot in the same atomic replacement, without rereading the datastore.
 
 Task commands, imports and TUI mutations share this transaction policy. Presentation, exit codes and selection remain in their adapters.
+
+Each `OperationItem` carries a stable `OperationCode`, status, optional task ID and typed domain parameters such as state, limit, count, target, reference ID, priority or tags. Services do not produce English or terminal-formatted messages. CLI and TUI format the same outcomes through `operation_messages.py`. The CLI writes changed/unchanged feedback to stdout, rejected feedback to stderr and exits nonzero only when at least one item is rejected. A mixed batch retains ordered item attribution and still commits all accepted changes in one undoable transaction.
+
+`TaskConflict` is a separate typed application exception carrying `TASK_CONFLICT` and the affected task ID. Infrastructure failures remain adapter exceptions from persistence. Adapters therefore never infer domain rejection, conflict or infrastructure failure from text or an `Error:` prefix. The result decision is recorded in [ADR 0002](adr/0002-typed-operation-results.md).
 
 Read-only operations (`show`, `history`, export and normal TUI reads) do not acquire the exclusive writer lock.
 
@@ -92,7 +98,7 @@ Plain and JSON formats contain no visual styling. Rich honors `NO_COLOR`, which 
 
 ## Domain invariants
 
-The domain boundary consists of `models.py`, `policy.py` and `services.py`. These modules do not import Click, PyYAML, Rich, Textual, themes, filesystem paths or application configuration. `models.py` enforces intrinsic validity; `BoardPolicy` supplies configured business limits; services receive that policy directly. The accepted dependency direction and follow-up boundaries are recorded in [ADR 0001](adr/0001-domain-boundaries.md).
+The domain boundary consists of `models.py`, `policy.py`, `results.py` and `services.py`. These modules do not import Click, PyYAML, Rich, Textual, themes, filesystem paths or application configuration. `models.py` enforces intrinsic validity; `BoardPolicy` supplies configured business limits; services receive that policy directly and return the application result contract. The accepted dependency direction and follow-up boundaries are recorded in [ADR 0001](adr/0001-domain-boundaries.md).
 
 A `Task` has a positive integer ID, a supported state, non-empty text, timezone-aware creation/modification timestamps, a positive manual position, optional priority/tags, and an optional completion timestamp.
 
@@ -197,7 +203,7 @@ Imports are parsed into the validated domain model before persistence. Pure poli
 
 Edit/tag dialogs retain their drafts on conflict and require explicit Ctrl+R review before a new submission. The subsequent commit checks the refreshed expectation again. Missing or archived tasks remain blocked. Other selected-task shortcuts reject stale state and refresh the board; archive conflicts require reopening the picker. Relative reordering checks the selected task and resolves its current neighbor inside the transaction, so unrelated neighbor changes do not apply an obsolete target. Changes to unrelated task content do not invalidate a task expectation.
 
-Add, edit and tag dialogs submit through a shared transactional prompt. Validation and capacity failures return their service messages next to the focused input; lock and write failures use the same retry path. The draft remains unchanged and the input is disabled while one submission is applying, preventing duplicate confirmation. Only a successful operation dismisses the dialog. Escape dismisses without another transaction and the board refresh restores the prior task selection.
+Add, edit and tag dialogs submit through a shared transactional prompt. Rejected validation and capacity outcomes are formatted next to the focused input; lock and write failures use the same retry path. The draft remains unchanged and the input is disabled while one submission is applying, preventing duplicate confirmation. Changed and unchanged outcomes dismiss the dialog, while rejected outcomes retain it. Escape dismisses without another transaction and the board refresh restores the prior task selection.
 
 The Textual TUI calls the same services and storage functions as the CLI. Validation, capacity rules, locking, undo, metadata normalization and ordering therefore have one implementation. Palette resolution is a presentation-adapter concern and is not part of these application paths.
 

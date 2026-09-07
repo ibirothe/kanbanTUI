@@ -151,7 +151,7 @@ TODO and IN PROGRESS tasks have persistent manual ordering. Use `move <id> top`,
 
 `add` treats all words after the command as one task description. `edit` preserves task ID, state, creation time, manual position, priority, tags, and completion time. `history` lists archived tasks, and `restore` returns archived tasks to TODO while respecting configured capacity limits.
 
-Successful mutations use short task-centric messages such as `Added #12`, `Started #12`, and `Completed #12`. Rejected operations begin with `Error:` and return a non-zero exit status. For multi-ID commands, the command returns non-zero if any requested operation fails.
+Changed operations use short task-centric messages such as `Added #12`, `Started #12`, and `Completed #12`. Already-satisfied operations are reported as successful no-ops and leave persistence and undo unchanged. Rejected operations begin with `Error:`, are written to stderr and return a non-zero exit status. For mixed multi-ID commands, accepted feedback goes to stdout, rejected feedback goes to stderr and the command returns non-zero if any item is rejected.
 
 Unique command prefixes are accepted only when unambiguous.
 
