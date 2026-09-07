@@ -1,9 +1,23 @@
 # Local HTTP import adapter
 
-`http_api.py` supplies `ImportApi(application, policy, token=...)` and
-`create_server(api, port=...)`. CLI startup is delivered separately in #102;
-there is currently no `kanban-tui api` command. The caller owns
-`serve_forever()`, `shutdown()` and `server_close()` (or the server context manager).
+Start the foreground server for the default board:
+
+```bash
+export KANBAN_TUI_API_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+kanban-tui serve-api
+```
+
+Select a named board or explicit configuration with the existing root options:
+
+```bash
+kanban-tui --board work serve-api --port 8765
+kanban-tui --config ./board.yaml serve-api --port 8765
+```
+
+The command resolves configuration, policy and datastore once at startup. Restart
+it after changing the selected configuration. It runs in the foreground and stops
+cleanly on Ctrl+C. Port 8765 is the default; port 0 lets the OS select an available
+port and the actual address is printed. The token environment variable must be set.
 
 The adapter uses Python's standard-library HTTP server for this bounded local
 interface. It always binds to numeric `127.0.0.1`; there is no host override,
@@ -16,6 +30,16 @@ Both routes require `Authorization: Bearer <token>`:
 
 - `GET /health` returns `{"status":"ok"}` without reading the datastore.
 - `POST /v1/board/import?mode=merge` or `?mode=replace` imports the body.
+
+For example, import an existing export file:
+
+```bash
+curl --fail-with-body \
+  -H "Authorization: Bearer $KANBAN_TUI_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data-binary @board.json \
+  "http://127.0.0.1:8765/v1/board/import?mode=merge"
+```
 
 The mode is required and must occur exactly once. Other query parameters are
 rejected. The body is the existing `kanbanTUI-board` version 1 JSON envelope,
@@ -34,6 +58,9 @@ a randomly generated secret. Authorization uses a constant-time byte comparison.
 The adapter emits no request logs and no CORS headers. Responses have `no-store`
 caching and never include exception messages, filesystem paths or tracebacks.
 Loopback limits network reach; the token limits callers who can perform imports.
+Environment variables can be read by sufficiently privileged local processes; the
+token is authentication between cooperating local clients, not isolation from the
+machine administrator.
 
 ## Responses
 

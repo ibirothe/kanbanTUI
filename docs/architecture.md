@@ -10,7 +10,7 @@ The runtime dependency set is deliberately small: Click, PyYAML, Rich, and Textu
 
 Production code lives under `src/kanban_tui/`:
 
-- `cli.py` — Click command surface, native prefix/board/theme completion, board/config selection, theme selection, transfer and undo wiring.
+- `cli.py` — Click command surface, native completion, board/config selection and composition roots for terminal and local HTTP adapters.
 - `config.py` — XDG/portable/legacy path resolution, named boards, presentation-independent YAML validation and atomic config writes.
 - `resources.py` — shared canonical config/datastore/lock paths and collision checks.
 - `models.py` — typed domain model and business invariants.
@@ -203,7 +203,7 @@ The JSON file adapter in `transfer.py` delegates payload conversion to that code
 
 `replace` preserves imported IDs. `merge` preserves non-conflicting IDs and deterministically remaps collisions against active or archived history. Export refuses destinations that resolve to the selected board's config file, datastore or datastore lock file.
 
-The local HTTP adapter and its wire contract are documented in [Local HTTP API](local-api.md). It is independently injectable; CLI startup is tracked separately in #102.
+The local HTTP adapter and its wire contract are documented in [Local HTTP API](local-api.md) and [ADR 0004](adr/0004-local-http-api.md). `kanban-tui serve-api` resolves the selected configuration and application once, then owns the foreground server lifecycle. The command name preserves `a` as the unique prefix for `add`. The token comes only from `KANBAN_TUI_API_TOKEN`; the listener remains fixed to numeric IPv4 loopback.
 
 ## TUI safety
 
