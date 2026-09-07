@@ -10,7 +10,7 @@ def test_domain_and_services_import_without_adapter_dependencies():
 import builtins
 import sys
 
-blocked = {"click", "pathlib", "rich", "textual", "yaml"}
+blocked = {"click", "http", "pathlib", "rich", "socketserver", "textual", "yaml"}
 real_import = builtins.__import__
 
 def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
