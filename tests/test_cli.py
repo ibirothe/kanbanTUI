@@ -227,8 +227,10 @@ def test_mixed_batch_returns_failure_if_any_item_fails(runner, write_config):
     result = runner.invoke(main, ["start", "1", "2"])
 
     assert result.exit_code == 1
-    assert "Started #1." in result.output
-    assert "Error: WIP limit reached (1/1)." in result.output
+    assert "Started #1." in result.stdout
+    assert "Error: WIP limit reached (1/1)." not in result.stdout
+    assert "Error: WIP limit reached (1/1)." in result.stderr
+    assert "Started #1." not in result.stderr
 
 
 def test_move_reorders_tasks_and_persists_across_show(runner, write_config):
@@ -253,8 +255,10 @@ def test_noop_reorder_does_not_replace_previous_undo_snapshot(runner, write_conf
 
     result = runner.invoke(main, ["move", "1", "top"])
 
-    assert result.exit_code == 1
+    assert result.exit_code == 0
     assert "already at top" in result.output
+    assert "Error:" not in result.stdout
+    assert result.stderr == ""
 
     undo_result = runner.invoke(main, ["undo"])
     assert undo_result.exit_code == 0

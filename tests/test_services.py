@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from kanban_tui.models import Board, Task, TaskState
 from kanban_tui.policy import BoardPolicy
+from kanban_tui.results import OperationCode, OperationStatus
 from kanban_tui.services import (
     add_tasks,
     delete_tasks,
@@ -28,6 +29,10 @@ def task(task_id, state, text, position=0):
     return Task(task_id, state, text, NOW, BEFORE, position=position)
 
 
+def codes(result):
+    return [item.code for item in result.items]
+
+
 def test_add_and_delete_tasks():
     board = Board()
 
@@ -40,8 +45,8 @@ def test_add_and_delete_tasks():
     assert board.active[2].position == 1
     assert add_result.succeeded == 2
     assert add_result.failed == 0
-    assert "Added #1: one" in add_result.messages
-    assert "Archived #1." in delete_result.messages
+    assert codes(add_result) == [OperationCode.TASK_ADDED, OperationCode.TASK_ADDED]
+    assert codes(delete_result) == [OperationCode.TASK_ARCHIVED]
 
 
 def test_add_normalizes_outer_whitespace_and_rejects_empty_text():
@@ -52,7 +57,8 @@ def test_add_normalizes_outer_whitespace_and_rejects_empty_text():
     assert board.active[1].text == "one"
     assert result.succeeded == 1
     assert result.failed == 1
-    assert "Error: task text cannot be empty." in result.messages
+    assert codes(result) == [OperationCode.TASK_ADDED, OperationCode.TEXT_EMPTY]
+    assert result.items[1].status is OperationStatus.REJECTED
 
 
 def test_deleted_highest_id_is_not_reused():
@@ -66,7 +72,9 @@ def test_deleted_highest_id_is_not_reused():
     assert 2 in board.deleted
     assert board.deleted[2].text == "two"
     assert 3 in board.active
-    assert "Added #3: three" in result.messages
+    assert len(result.items) == 1
+    assert result.items[0].code is OperationCode.TASK_ADDED
+    assert (result.items[0].task_id, result.items[0].text) == (3, "three")
 
     delete_tasks(board, ["3"])
     assert board.deleted[2].text == "two"
@@ -87,7 +95,8 @@ def test_edit_updates_text_without_changing_task_identity_state_or_position():
     assert board.active[1].created_at == BEFORE
     assert board.active[1].modified_at != NOW
     assert board.active[1].modified_at.tzinfo is not None
-    assert result.messages == ["Updated #1: new task text"]
+    assert codes(result) == [OperationCode.TASK_UPDATED]
+    assert (result.items[0].task_id, result.items[0].text) == (1, "new task text")
 
 
 def test_edit_with_normalized_identical_text_is_unchanged(monkeypatch):
@@ -103,7 +112,8 @@ def test_edit_with_normalized_identical_text_is_unchanged(monkeypatch):
 
     assert result.ok
     assert result.succeeded == 1
-    assert result.messages == ["Task #1 is unchanged."]
+    assert codes(result) == [OperationCode.TASK_UNCHANGED]
+    assert result.items[0].status is OperationStatus.UNCHANGED
     assert board.active[1] is original
     assert original.modified_at == NOW
 
@@ -114,7 +124,8 @@ def test_edit_deleted_task_is_rejected():
     result = edit_task(base_config(), board, "1", "new")
 
     assert result.failed == 1
-    assert result.messages == ["Error: archived task #1 cannot be edited."]
+    assert codes(result) == [OperationCode.ARCHIVED_TASK_NOT_EDITABLE]
+    assert result.items[0].task_id == 1
 
 
 def test_restore_preserves_id_creation_time_and_moves_to_bottom():
@@ -133,7 +144,7 @@ def test_restore_preserves_id_creation_time_and_moves_to_bottom():
     assert board.active[1].created_at == BEFORE
     assert board.active[1].modified_at != NOW
     assert board.active[1].modified_at.tzinfo is not None
-    assert result.messages == ["Restored #1 to TODO."]
+    assert codes(result) == [OperationCode.TASK_RESTORED]
 
 
 def test_restore_respects_todo_limit():
@@ -146,7 +157,12 @@ def test_restore_respects_todo_limit():
 
     assert result.failed == 1
     assert 2 in board.deleted
-    assert result.messages == ["Error: TODO limit reached (1/1)."]
+    assert codes(result) == [OperationCode.STATE_LIMIT_REACHED]
+    assert (result.items[0].state, result.items[0].count, result.items[0].limit) == (
+        TaskState.TODO,
+        1,
+        1,
+    )
 
 
 def test_explicit_state_commands_move_directly_to_target_state():
@@ -162,9 +178,10 @@ def test_explicit_state_commands_move_directly_to_target_state():
     todo_result = move_tasks_to_state(config, board, ["2"], TaskState.TODO)
     done_result = move_tasks_to_state(config, board, ["1"], TaskState.DONE)
 
-    assert start_result.messages == ["Started #1."]
-    assert todo_result.messages == ["Moved #2 to TODO."]
-    assert done_result.messages == ["Completed #1."]
+    assert codes(start_result) == [OperationCode.TASK_STARTED]
+    assert codes(todo_result) == [OperationCode.TASK_MOVED]
+    assert todo_result.items[0].state is TaskState.TODO
+    assert codes(done_result) == [OperationCode.TASK_COMPLETED]
     assert board.active[1].state is TaskState.DONE
     assert board.active[2].state is TaskState.TODO
 
@@ -180,8 +197,9 @@ def test_explicit_state_command_rejects_same_state_and_capacity():
     same = move_tasks_to_state(base_config(), board, ["1"], TaskState.TODO)
     full = move_tasks_to_state(base_config(wip=0), board, ["1"], TaskState.IN_PROGRESS)
 
-    assert same.messages == ["Error: task #1 is already TODO."]
-    assert full.messages == ["Error: WIP limit reached (0/0)."]
+    assert codes(same) == [OperationCode.TASK_ALREADY_IN_STATE]
+    assert same.items[0].status is OperationStatus.UNCHANGED
+    assert codes(full) == [OperationCode.STATE_LIMIT_REACHED]
 
 
 def test_batch_promotion_respects_wip_limit():
@@ -197,7 +215,15 @@ def test_batch_promotion_respects_wip_limit():
     assert board.active[2].position == 1
     assert result.succeeded == 1
     assert result.failed == 1
-    assert result.messages == ["Started #1.", "Error: WIP limit reached (1/1)."]
+    assert codes(result) == [
+        OperationCode.TASK_STARTED,
+        OperationCode.STATE_LIMIT_REACHED,
+    ]
+    assert [item.task_id for item in result.items] == [1, 2]
+    assert [item.status for item in result.items] == [
+        OperationStatus.CHANGED,
+        OperationStatus.REJECTED,
+    ]
 
 
 def test_regress_done_respects_wip_limit():
@@ -213,7 +239,7 @@ def test_regress_done_respects_wip_limit():
 
     assert board.active[2].state is TaskState.DONE
     assert result.failed == 1
-    assert result.messages == ["Error: WIP limit reached (1/1)."]
+    assert codes(result) == [OperationCode.STATE_LIMIT_REACHED]
 
 
 def test_regress_inprogress_returns_to_todo_at_bottom():
@@ -229,7 +255,8 @@ def test_regress_inprogress_returns_to_todo_at_bottom():
     assert board.active[2].state is TaskState.TODO
     assert board.active[2].position == 2
     assert result.succeeded == 1
-    assert result.messages == ["Moved #2 to TODO."]
+    assert codes(result) == [OperationCode.TASK_MOVED]
+    assert result.items[0].state is TaskState.TODO
 
 
 def test_regress_inprogress_respects_todo_limit():
@@ -245,7 +272,7 @@ def test_regress_inprogress_respects_todo_limit():
 
     assert board.active[2].state is TaskState.IN_PROGRESS
     assert result.failed == 1
-    assert result.messages == ["Error: TODO limit reached (1/1)."]
+    assert codes(result) == [OperationCode.STATE_LIMIT_REACHED]
 
 
 def test_batch_regression_respects_live_todo_capacity():
@@ -263,7 +290,10 @@ def test_batch_regression_respects_live_todo_capacity():
     assert board.active[2].state is TaskState.IN_PROGRESS
     assert result.succeeded == 1
     assert result.failed == 1
-    assert result.messages == ["Moved #1 to TODO.", "Error: TODO limit reached (1/1)."]
+    assert codes(result) == [
+        OperationCode.TASK_MOVED,
+        OperationCode.STATE_LIMIT_REACHED,
+    ]
 
 
 def test_reorder_task_supports_top_bottom_before_and_after():
@@ -301,6 +331,6 @@ def test_reorder_rejects_cross_column_reference_and_done_tasks():
     done = reorder_task(board, "3", "top")
 
     assert cross_column.failed == 1
-    assert "same column" in cross_column.messages[0]
+    assert codes(cross_column) == [OperationCode.REFERENCE_DIFFERENT_STATE]
     assert done.failed == 1
-    assert "completion time" in done.messages[0]
+    assert codes(done) == [OperationCode.DONE_ORDER_FIXED]

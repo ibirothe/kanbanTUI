@@ -73,15 +73,15 @@ def test_undo_reorder_restores_previous_manual_order(runner, write_config):
     assert [item["id"] for item in show_tasks(runner)] == [1, 2]
 
 
-def test_failed_operation_does_not_replace_last_successful_snapshot(
+def test_unchanged_operation_does_not_replace_last_successful_snapshot(
     runner, write_config
 ):
     write_config()
     runner.invoke(main, ["add", "task"])
     runner.invoke(main, ["start", "1"])
 
-    failed = runner.invoke(main, ["start", "1"])
-    assert failed.exit_code != 0
+    unchanged = runner.invoke(main, ["start", "1"])
+    assert unchanged.exit_code == 0
 
     runner.invoke(main, ["undo"])
     assert show_tasks(runner)[0]["state"] == "todo"

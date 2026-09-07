@@ -2,7 +2,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from kanban_tui.services import OperationResult, add_tasks, edit_task
+from kanban_tui.results import OperationCode, OperationResult
+from kanban_tui.services import add_tasks, edit_task
 from kanban_tui.storage import read_data
 from kanban_tui.transactions import (
     TaskConflict,
@@ -42,6 +43,7 @@ def test_conflict_prevents_operation_and_preserves_snapshot(write_config):
 
     with pytest.raises(TaskConflict) as caught:
         mutate_board(config, must_not_run, expected_tasks=(expected,))
+    assert caught.value.code is OperationCode.TASK_CONFLICT
     assert caught.value.board.active[1].text == "external"
     assert config.data_path.read_bytes() == original
     assert undo_board(config).active[1].text == "one"
@@ -66,7 +68,7 @@ def test_failed_and_noop_transactions_preserve_snapshot(write_config):
     mutate_board(config, lambda board: add_tasks(config.policy, board, ["one"]))
     original = config.data_path.read_bytes()
     mutate_board(config, lambda board: add_tasks(config.policy, board, [""]))
-    mutate_board(config, lambda board: OperationResult(succeeded=1))
+    mutate_board(config, lambda board: OperationResult())
     assert config.data_path.read_bytes() == original
     assert not undo_board(config).active
 
@@ -93,7 +95,7 @@ def test_identical_edit_preserves_datastore_and_previous_undo(
         config, lambda b: edit_task(config.policy, b, "1", "  same  ")
     )
 
-    assert result.messages == ["Task #1 is unchanged."]
+    assert [item.code for item in result.items] == [OperationCode.TASK_UNCHANGED]
     assert current.active[1].modified_at == original_modified_at
     assert config.data_path.read_bytes() == original_bytes
     assert not undo_board(config).active

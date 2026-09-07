@@ -175,9 +175,9 @@ def test_relative_noop_reorders_do_not_touch_modified_time():
     after = reorder_task(board, "3", "after", "2")
     bottom = reorder_task(board, "3", "bottom")
 
-    assert before.failed == 1
-    assert after.failed == 1
-    assert bottom.failed == 1
+    assert before.unchanged == 1
+    assert after.unchanged == 1
+    assert bottom.unchanged == 1
     assert first.modified_at == T09
     assert second.modified_at == T10
     assert third.modified_at == T11

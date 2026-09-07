@@ -10,9 +10,10 @@ from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Input, Label, ListItem, ListView, Static
 
 from .models import Board, Task, TaskPriority, TaskState
+from .operation_messages import format_result, format_task_conflict
 from .rendering import column_label, task_rich_text, visible_tasks
+from .results import OperationResult
 from .services import (
-    OperationResult,
     add_tasks,
     delete_tasks,
     edit_task,
@@ -143,7 +144,7 @@ class MutationPromptScreen(PromptScreen):
 
     def _handle_conflict(self, exc: TaskConflict) -> None:
         self.current_board = exc.board
-        self._status(f"{exc} Draft kept; Esc to cancel.")
+        self._status(f"{format_task_conflict(exc.task_id)} Draft kept; Esc to cancel.")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         event.stop()
@@ -182,11 +183,11 @@ class MutationPromptScreen(PromptScreen):
             return
 
         self.current_board = board
-        if result.succeeded:
+        if result.changed or result.unchanged:
             self.outcome = result
             self.dismiss(event.value)
         else:
-            self._status(" ".join(result.messages))
+            self._status(" ".join(format_result(result)))
 
 
 class AddTaskPromptScreen(MutationPromptScreen):
@@ -239,7 +240,10 @@ class TaskPromptScreen(MutationPromptScreen):
     def _handle_conflict(self, exc: TaskConflict) -> None:
         self.current_board = exc.board
         self.conflicted = True
-        self._status(f"{exc} Your draft is kept. Ctrl+R to review · Esc to cancel.")
+        self._status(
+            f"{format_task_conflict(exc.task_id)} Your draft is kept. "
+            "Ctrl+R to review · Esc to cancel."
+        )
 
     def action_review_current(self) -> None:
         try:
@@ -403,16 +407,21 @@ class ArchiveScreen(ModalScreen[tuple[Board, int] | None]):
             )
         except TaskConflict as exc:
             self.query_one("#archive-status", Static).update(
-                Text(f"{exc} Close and reopen the archive to review current tasks.")
+                Text(
+                    f"{format_task_conflict(exc.task_id)} "
+                    "Close and reopen the archive to review current tasks."
+                )
             )
             return
         except click.ClickException as exc:
             self.query_one("#archive-status", Static).update(f"Error: {exc}")
             return
-        if result.succeeded:
+        if result.changed or result.unchanged:
             self.dismiss((board, item.task_id))
         else:
-            self.query_one("#archive-status", Static).update(" ".join(result.messages))
+            self.query_one("#archive-status", Static).update(
+                " ".join(format_result(result))
+            )
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -696,7 +705,10 @@ class KanbanApp(App[None]):
         except TaskConflict as exc:
             self.board = exc.board
             await self._refresh_board(focus_task_id=focus_task_id)
-            self._set_status(f"{exc} Board refreshed; review and retry.")
+            self._set_status(
+                f"{format_task_conflict(exc.task_id)} "
+                "Board refreshed; review and retry."
+            )
             return
         except click.ClickException as exc:
             self._set_status(f"Error: {exc}")
@@ -706,7 +718,7 @@ class KanbanApp(App[None]):
         if focus_task_id is not None and focus_task_id in board.active:
             actual_focus_state = board.active[focus_task_id].state
 
-        self._set_status(" ".join(result.messages))
+        self._set_status(" ".join(format_result(result)))
         await self._refresh_board(
             focus_task_id=focus_task_id,
             focus_state=actual_focus_state,
@@ -748,7 +760,7 @@ class KanbanApp(App[None]):
             self.board = screen.current_board
             await self._refresh_board(focus_task_id=focus_task_id)
         if value is not None and screen.outcome is not None:
-            self._set_status(" ".join(screen.outcome.messages))
+            self._set_status(" ".join(format_result(screen.outcome)))
 
     async def action_cycle_priority(self) -> None:
         task = self._selected_task()

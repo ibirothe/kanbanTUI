@@ -4,6 +4,7 @@
 
 ### Fixes and quality
 
+- return typed per-task operation codes, parameters and `changed`/`unchanged`/`rejected` states from services; format output and choose CLI streams/exit codes only in adapters;
 - separate task/board models and `BoardPolicy` from application paths, themes and terminal dependencies; translate pure import-policy errors only in adapters;
 - keep one resolved palette for each TUI session and allow unstyled commands to operate when the selected custom-theme file becomes unavailable;
 - retain add, edit and tag drafts in the focused TUI prompt across validation, capacity, lock and write failures so users can correct or retry without retyping;
@@ -26,6 +27,7 @@
 
 ### Documentation and maintenance
 
+- record the typed operation-result and adapter-presentation contract in ADR 0002;
 - record the domain, policy, configuration and adapter dependency direction in ADR 0001;
 - split configuration, themes and shell completion into linked user references;
 - add a quick start, documentation index, contribution guide and maintenance checklist;
