@@ -51,7 +51,10 @@ def format_operation(item: OperationItem) -> str:
     if code is OperationCode.IMPORT_UNCHANGED:
         return "Import produced no board changes."
     if code is OperationCode.IDS_REMAPPED:
-        return f"Remapped task IDs: {item.text}"
+        mapping = ", ".join(
+            f"#{old_id}->#{new_id}" for old_id, new_id in item.id_mapping
+        )
+        return f"Remapped task IDs: {mapping}"
 
     if code is OperationCode.TEXT_EMPTY:
         return "Error: task text cannot be empty."

@@ -1,60 +1,18 @@
-"""Application transaction boundaries shared by terminal adapters."""
+"""Compatibility wrappers for the application transaction API.
+
+New adapter code should construct ``BoardApplication`` once and inject it.
+These config-based functions remain temporarily for third-party callers.
+"""
 
 from collections.abc import Callable
-from copy import deepcopy
-from dataclasses import dataclass
-from datetime import datetime
 
-from .models import Board, Task, TaskPriority, TaskState
-from .results import OperationCode, OperationResult
+import click
+
+from .application import BoardApplication, StoreError, TaskConflict, TaskExpectation
+from .models import Board
+from .results import OperationResult
 from .settings import AppConfig
-from .storage import datastore_lock, read_data, undo_last_change, write_data
-
-
-@dataclass(frozen=True)
-class TaskExpectation:
-    """Detached comparison of the complete task state represented on disk."""
-
-    task_id: int
-    archived: bool
-    state: TaskState
-    text: str
-    modified_at: datetime
-    created_at: datetime
-    position: int
-    priority: TaskPriority | None
-    tags: tuple[str, ...]
-    completed_at: datetime | None
-
-    @classmethod
-    def capture(cls, task: Task) -> "TaskExpectation":
-        return cls(
-            task.id,
-            task.state is TaskState.DELETED,
-            task.state,
-            task.text,
-            task.modified_at,
-            task.created_at,
-            task.position,
-            task.priority,
-            task.tags,
-            task.completed_at,
-        )
-
-    def matches(self, board: Board) -> bool:
-        tasks = board.deleted if self.archived else board.active
-        task = tasks.get(self.task_id)
-        return task is not None and self == self.capture(task)
-
-
-class TaskConflict(Exception):
-    """A snapshot-dependent command no longer matches the current task."""
-
-    def __init__(self, board: Board, task_id: int) -> None:
-        self.board = board
-        self.task_id = task_id
-        self.code = OperationCode.TASK_CONFLICT
-        super().__init__(task_id)
+from .storage import YamlBoardStore
 
 
 def mutate_board(
@@ -63,20 +21,19 @@ def mutate_board(
     *,
     expected_tasks: tuple[TaskExpectation, ...] = (),
 ) -> tuple[Board, OperationResult]:
-    with datastore_lock(config):
-        board = read_data(config)
-        for expected in expected_tasks:
-            if not expected.matches(board):
-                raise TaskConflict(board, expected.task_id)
-        previous = deepcopy(board)
-        result = operation(board)
-        if result.changed and board != previous:
-            write_data(config, board, previous=previous)
-        else:
-            board = previous
-    return board, result
+    try:
+        return BoardApplication(YamlBoardStore(config)).mutate(
+            operation, expected_tasks=expected_tasks
+        )
+    except StoreError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 def undo_board(config: AppConfig) -> Board:
-    with datastore_lock(config):
-        return undo_last_change(config)
+    try:
+        return BoardApplication(YamlBoardStore(config)).undo()
+    except StoreError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+__all__ = ["TaskConflict", "TaskExpectation", "mutate_board", "undo_board"]

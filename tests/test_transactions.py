@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 
 import pytest
 
+from kanban_tui.application import BoardApplication
+from kanban_tui.policy import BoardPolicy
 from kanban_tui.results import OperationCode, OperationResult
 from kanban_tui.services import add_tasks, edit_task
 from kanban_tui.storage import read_data
@@ -11,24 +13,19 @@ from kanban_tui.transactions import (
     mutate_board,
     undo_board,
 )
+from tests.store_test_double import MemoryBoardStore
 
 
-def test_transaction_reads_once_and_snapshots_detached_state(write_config, monkeypatch):
-    config = write_config()
-    reads = []
-
-    def counted_read(config):
-        reads.append(config)
-        return read_data(config)
-
-    monkeypatch.setattr("kanban_tui.transactions.read_data", counted_read)
-    board, result = mutate_board(
-        config, lambda board: add_tasks(config.policy, board, ["one"])
+def test_transaction_reads_once_and_snapshots_detached_state():
+    store = MemoryBoardStore()
+    application = BoardApplication(store)
+    board, result = application.mutate(
+        lambda current: add_tasks(BoardPolicy(), current, ["one"])
     )
     assert result.succeeded == 1
-    assert len(reads) == 1
+    assert store.loads == 1
     board.active[1].text = "changed in memory"
-    assert not undo_board(config).active
+    assert not application.undo().active
 
 
 def test_conflict_prevents_operation_and_preserves_snapshot(write_config):

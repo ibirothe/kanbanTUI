@@ -4,6 +4,7 @@
 
 ### Fixes and quality
 
+- route shared read, mutation, import and undo use cases through application-owned store/transaction protocols; provide a YAML adapter and an in-memory contract test double;
 - return typed per-task operation codes, parameters and `changed`/`unchanged`/`rejected` states from services; format output and choose CLI streams/exit codes only in adapters;
 - separate task/board models and `BoardPolicy` from application paths, themes and terminal dependencies; translate pure import-policy errors only in adapters;
 - keep one resolved palette for each TUI session and allow unstyled commands to operate when the selected custom-theme file becomes unavailable;
@@ -27,6 +28,7 @@
 
 ### Documentation and maintenance
 
+- record persistence ports, transaction guarantees and dependency injection in ADR 0003;
 - record the typed operation-result and adapter-presentation contract in ADR 0002;
 - record the domain, policy, configuration and adapter dependency direction in ADR 0001;
 - split configuration, themes and shell completion into linked user references;

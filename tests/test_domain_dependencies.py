@@ -20,6 +20,7 @@ def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
 
 builtins.__import__ = guarded_import
 
+from kanban_tui.application import BoardApplication, BoardStore, BoardTransaction
 from kanban_tui.models import Board, Task, TaskState
 from kanban_tui.policy import BoardPolicy
 from kanban_tui.results import OperationCode, OperationStatus
@@ -32,6 +33,9 @@ assert result.items[0].code is OperationCode.TASK_ADDED
 assert result.items[0].status is OperationStatus.CHANGED
 assert not hasattr(result, "messages")
 assert "kanban_tui.operation_messages" not in sys.modules
+assert BoardApplication is not None
+assert BoardStore is not None
+assert BoardTransaction is not None
 assert isinstance(board.active[1], Task)
 assert board.active[1].state is TaskState.TODO
 """

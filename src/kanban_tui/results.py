@@ -78,6 +78,7 @@ class OperationItem:
     priority: TaskPriority | None = None
     tags: tuple[str, ...] = ()
     action: str | None = None
+    id_mapping: tuple[tuple[int, int], ...] = ()
 
 
 class OperationValues(TypedDict, total=False):
@@ -92,6 +93,7 @@ class OperationValues(TypedDict, total=False):
     priority: TaskPriority | None
     tags: tuple[str, ...]
     action: str | None
+    id_mapping: tuple[tuple[int, int], ...]
 
 
 @dataclass

@@ -1,5 +1,6 @@
 import os
 import sys
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import BinaryIO
@@ -7,6 +8,7 @@ from typing import BinaryIO
 import click
 import yaml
 
+from .application import BoardTransaction, StoreError
 from .atomic import atomic_text_writer
 from .codec import DatastoreDocument, dump_datastore, load_datastore
 from .models import Board
@@ -172,3 +174,41 @@ def undo_last_change(config: AppConfig) -> Board:
     previous = document.previous
     _atomic_write_document(data_path, previous)
     return previous
+
+
+class YamlBoardTransaction:
+    """Writer-side implementation of the application transaction port."""
+
+    def __init__(self, config: AppConfig) -> None:
+        self.config = config
+
+    def load(self) -> Board:
+        return read_data(self.config, initialize_missing=False)
+
+    def commit(self, board: Board, *, previous: Board) -> None:
+        write_data(self.config, board, previous=previous)
+
+    def undo(self) -> Board:
+        return undo_last_change(self.config)
+
+
+class YamlBoardStore:
+    """YAML-backed adapter for the application-owned board store port."""
+
+    def __init__(self, config: AppConfig) -> None:
+        self.config = config
+
+    def read(self) -> Board:
+        try:
+            return read_data(self.config, initialize_missing=False)
+        except click.ClickException as exc:
+            raise StoreError(str(exc)) from exc
+
+    @contextmanager
+    def transaction(self) -> Iterator[BoardTransaction]:
+        try:
+            with datastore_lock(self.config):
+                transaction: BoardTransaction = YamlBoardTransaction(self.config)
+                yield transaction
+        except click.ClickException as exc:
+            raise StoreError(str(exc)) from exc

@@ -17,11 +17,13 @@ Production code lives under `src/kanban_tui/`:
 - `policy.py` — presentation-independent TODO/WIP capacity and task-text policy with pure domain errors.
 - `results.py` — typed per-item operation codes, parameters and statuses.
 - `services.py` — task mutations returning typed results and depending only on the domain model, policy and result contract.
+- `imports.py` — pure merge/replace import composition and deterministic ID remapping.
+- `application.py` — application-owned store/transaction protocols plus shared read, mutation, import and undo use cases.
 - `operation_messages.py` — English terminal presentation for operation results.
 - `settings.py` — compatible `AppConfig` composition of infrastructure, policy and presentation settings.
 - `atomic.py` — shared same-directory temporary-file lifecycle and cleanup.
-- `transactions.py` — shared lock/read/mutate/write and undo application boundaries.
-- `storage.py` — side-effect-free reads, cross-process writer locking, atomic YAML writes and undo.
+- `transactions.py` — temporary config-based compatibility wrappers around `BoardApplication`.
+- `storage.py` — YAML implementation of the application ports plus side-effect-free reads, cross-process writer locking, atomic writes and undo.
 - `codec.py` — strict YAML parsing, datastore schema versioning and legacy record migration.
 - `themes.py` — semantic built-in palettes plus XDG/portable custom-theme discovery and YAML validation.
 - `transfer.py` — complete JSON export/import, validation and merge ID remapping.
@@ -40,20 +42,22 @@ Click's built-in shell completion protocol is used for Bash, Zsh and Fish. Choic
 
 For a mutation:
 
-1. The CLI or TUI resolves the selected configuration.
+1. The CLI or TUI resolves the selected configuration and constructs one `BoardApplication` with `YamlBoardStore` at its entry point.
 2. `config.py` validates it into the compatible `AppConfig` composition. `AppConfig.policy` maps only TODO/WIP and task-text limits into the immutable `BoardPolicy`; paths and presentation settings are not passed to services.
-3. `transactions.py` owns the mutation boundary and acquires the datastore writer lock through `storage.py`.
-4. The YAML datastore is decoded by `codec.py` into a validated `Board`. A missing datastore is represented as an empty board without creating files or printing output.
+3. `application.py` owns the mutation use case and opens the `BoardStore.transaction()` port. The YAML adapter acquires the datastore writer lock before exposing its transaction context.
+4. `BoardTransaction.load()` returns a detached validated `Board`. The YAML adapter decodes it through `codec.py`; a missing datastore is represented as an empty board without creating files or printing output.
    Snapshot-dependent TUI commands then compare their task expectations against this current board while still holding the writer lock. A conflict returns the current board through `TaskConflict` before the operation or any write occurs.
 5. The transaction captures a detached pre-mutation board; `services.py` applies the operation and returns an `OperationResult` containing ordered per-item outcomes.
 6. Only outcomes with status `changed` can write the datastore. `unchanged` outcomes are accepted no-ops; `rejected` outcomes identify domain validation failures. The transaction still compares complete board state before committing.
-7. The captured previous board is stored as the single `_undo` snapshot in the same atomic replacement, without rereading the datastore.
+7. `BoardTransaction.commit()` stores the board and captured previous snapshot in the same atomic replacement, without rereading the datastore.
 
-Task commands, imports and TUI mutations share this transaction policy. Presentation, exit codes and selection remain in their adapters.
+Task commands, imports and TUI mutations share this application object and transaction policy. `BoardApplication.read()` uses the separate `BoardStore.read()` path and never opens a writer transaction. `BoardApplication.undo()` runs through the same writer transaction contract. Presentation, exit codes and selection remain in their adapters.
 
 Each `OperationItem` carries a stable `OperationCode`, status, optional task ID and typed domain parameters such as state, limit, count, target, reference ID, priority or tags. Services do not produce English or terminal-formatted messages. CLI and TUI format the same outcomes through `operation_messages.py`. The CLI writes changed/unchanged feedback to stdout, rejected feedback to stderr and exits nonzero only when at least one item is rejected. A mixed batch retains ordered item attribution and still commits all accepted changes in one undoable transaction.
 
-`TaskConflict` is a separate typed application exception carrying `TASK_CONFLICT` and the affected task ID. Infrastructure failures remain adapter exceptions from persistence. Adapters therefore never infer domain rejection, conflict or infrastructure failure from text or an `Error:` prefix. The result decision is recorded in [ADR 0002](adr/0002-typed-operation-results.md).
+`TaskConflict` is a separate typed application exception carrying `TASK_CONFLICT` and the affected task ID. Infrastructure failures cross the persistence port as `StoreError` and are translated by terminal adapters. Adapters therefore never infer domain rejection, conflict or infrastructure failure from text or an `Error:` prefix. The result decision is recorded in [ADR 0002](adr/0002-typed-operation-results.md).
+
+The persistence contract and dependency direction are recorded in [ADR 0003](adr/0003-persistence-ports.md). `BoardStore` and `BoardTransaction` are deliberately small `typing.Protocol` ports owned by the application. `YamlBoardStore` implements them; the contract suite uses an in-memory implementation to verify substitution without filesystem access or monkeypatching concrete storage globals. The compatibility functions in `transactions.py` may be removed after downstream callers migrate to explicit `BoardApplication` injection.
 
 Read-only operations (`show`, `history`, export and normal TUI reads) do not acquire the exclusive writer lock.
 
@@ -193,7 +197,7 @@ Each successful semantic mutation writes the new board and immediately previous 
 
 Complete transfer uses the distinct versioned `kanbanTUI-board` JSON envelope, version 1. It is not the datastore schema. Imports reject non-integer versions and unknown envelope or task fields. Exports include all active and archived tasks independent of view filters or DONE display limits.
 
-Imports are parsed into the validated domain model before persistence. Pure policy validation applies the selected board's task-text and TODO/WIP limits to the candidate. The CLI adapter translates a `PolicyViolation` into its Click error without making the policy depend on Click.
+Imports are parsed into the validated domain model by the JSON adapter before persistence. `BoardApplication.import_board()` owns merge/replace selection, deterministic remapping, policy validation and transactional commit. The CLI supplies only the decoded board, mode and display source, then translates a pure `PolicyViolation` into its Click error.
 
 `replace` preserves imported IDs. `merge` preserves non-conflicting IDs and deterministically remaps collisions against active or archived history. Export refuses destinations that resolve to the selected board's config file, datastore or datastore lock file.
 
@@ -205,7 +209,7 @@ Edit/tag dialogs retain their drafts on conflict and require explicit Ctrl+R rev
 
 Add, edit and tag dialogs submit through a shared transactional prompt. Rejected validation and capacity outcomes are formatted next to the focused input; lock and write failures use the same retry path. The draft remains unchanged and the input is disabled while one submission is applying, preventing duplicate confirmation. Changed and unchanged outcomes dismiss the dialog, while rejected outcomes retain it. Escape dismisses without another transaction and the board refresh restores the prior task selection.
 
-The Textual TUI calls the same services and storage functions as the CLI. Validation, capacity rules, locking, undo, metadata normalization and ordering therefore have one implementation. Palette resolution is a presentation-adapter concern and is not part of these application paths.
+The Textual TUI receives the same `BoardApplication` abstraction used by the CLI. Validation, capacity rules, locking, reads, mutations, undo, metadata normalization and ordering therefore have one implementation without global storage lookups. Palette resolution is a presentation-adapter concern and is not part of these application paths.
 
 Prompt input is routed through shared service validation. A searchable archive picker restores tasks using the shared transaction boundary and keeps capacity errors in the dialog. Explicit Ctrl+R refreshes external changes without writing or acquiring a writer lock; failures retain the last valid display. Selection is restored by task ID after rebuilding columns, with a visible-task fallback. Only highlights in the focused list update selection tracking.
 

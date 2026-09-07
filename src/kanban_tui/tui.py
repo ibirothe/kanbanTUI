@@ -9,6 +9,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Input, Label, ListItem, ListView, Static
 
+from .application import BoardApplication, StoreError, TaskConflict, TaskExpectation
 from .models import Board, Task, TaskPriority, TaskState
 from .operation_messages import format_result, format_task_conflict
 from .rendering import column_label, task_rich_text, visible_tasks
@@ -24,9 +25,8 @@ from .services import (
     set_task_tags,
 )
 from .settings import AppConfig
-from .storage import read_data
+from .storage import YamlBoardStore
 from .themes import Theme, get_theme
-from .transactions import TaskConflict, TaskExpectation, mutate_board, undo_board
 
 
 def _style_dialog(screen: ModalScreen, dialog_id: str, theme: Theme) -> None:
@@ -113,6 +113,7 @@ class MutationPromptScreen(PromptScreen):
     def __init__(
         self,
         config: AppConfig,
+        application: BoardApplication,
         prompt: str,
         palette: Theme,
         *,
@@ -120,6 +121,7 @@ class MutationPromptScreen(PromptScreen):
     ) -> None:
         super().__init__(prompt, palette, initial=initial)
         self.config = config
+        self.application = application
         self.current_board: Board | None = None
         self.outcome: OperationResult | None = None
         self._applying = False
@@ -160,16 +162,15 @@ class MutationPromptScreen(PromptScreen):
         self._applying = True
         input_widget.disabled = True
         conflict: TaskConflict | None = None
-        error: click.ClickException | None = None
+        error: click.ClickException | StoreError | None = None
         try:
-            board, result = mutate_board(
-                self.config,
+            board, result = self.application.mutate(
                 lambda board: self._apply(board, event.value),
                 expected_tasks=self._expected_tasks(),
             )
         except TaskConflict as exc:
             conflict = exc
-        except click.ClickException as exc:
+        except (click.ClickException, StoreError) as exc:
             error = exc
         finally:
             input_widget.disabled = False
@@ -193,8 +194,10 @@ class MutationPromptScreen(PromptScreen):
 class AddTaskPromptScreen(MutationPromptScreen):
     """Add one task without discarding rejected input."""
 
-    def __init__(self, config: AppConfig, palette: Theme) -> None:
-        super().__init__(config, "Add task", palette)
+    def __init__(
+        self, config: AppConfig, application: BoardApplication, palette: Theme
+    ) -> None:
+        super().__init__(config, application, "Add task", palette)
 
     def _apply(self, board: Board, value: str) -> OperationResult:
         return add_tasks(self.config.policy, board, [value])
@@ -208,12 +211,14 @@ class TaskPromptScreen(MutationPromptScreen):
     def __init__(
         self,
         config: AppConfig,
+        application: BoardApplication,
         task: Task,
         field: Literal["text", "tags"],
         palette: Theme,
     ) -> None:
         super().__init__(
             config,
+            application,
             "Edit task" if field == "text" else "Set tags (comma-separated)",
             palette,
             initial=task.text if field == "text" else ", ".join(task.tags),
@@ -247,8 +252,8 @@ class TaskPromptScreen(MutationPromptScreen):
 
     def action_review_current(self) -> None:
         try:
-            self.current_board = read_data(self.config)
-        except click.ClickException as exc:
+            self.current_board = self.application.read()
+        except (click.ClickException, StoreError) as exc:
             self._status(f"Error: {exc}")
             return
         task = self.current_board.active.get(self.expected.task_id)
@@ -341,9 +346,16 @@ class ArchiveScreen(ModalScreen[tuple[Board, int] | None]):
     #archive-status { height: auto; }
     """
 
-    def __init__(self, config: AppConfig, board: Board, palette: Theme) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        application: BoardApplication,
+        board: Board,
+        palette: Theme,
+    ) -> None:
         super().__init__()
         self.config = config
+        self.application = application
         self.board = board
         self.palette = palette
 
@@ -396,8 +408,7 @@ class ArchiveScreen(ModalScreen[tuple[Board, int] | None]):
         if not isinstance(item, TaskListItem):
             return
         try:
-            board, result = mutate_board(
-                self.config,
+            board, result = self.application.mutate(
                 lambda board: restore_tasks(
                     self.config.policy, board, [str(item.task_id)]
                 ),
@@ -413,7 +424,7 @@ class ArchiveScreen(ModalScreen[tuple[Board, int] | None]):
                 )
             )
             return
-        except click.ClickException as exc:
+        except (click.ClickException, StoreError) as exc:
             self.query_one("#archive-status", Static).update(f"Error: {exc}")
             return
         if result.changed or result.unchanged:
@@ -510,9 +521,16 @@ class KanbanApp(App[None]):
         TaskState.DONE: "done-title",
     }
 
-    def __init__(self, config: AppConfig, *, board_name: str = "default") -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        *,
+        application: BoardApplication | None = None,
+        board_name: str = "default",
+    ) -> None:
         super().__init__()
         self.config = config
+        self.application = application or BoardApplication(YamlBoardStore(config))
         self.board_name = board_name
         self.title = f"kanbanTUI · {board_name}"
         self._refreshing = False
@@ -598,9 +616,9 @@ class KanbanApp(App[None]):
 
     def _reload_board(self) -> bool:
         try:
-            self.board = read_data(self.config, initialize_missing=False)
+            self.board = self.application.read()
             return True
-        except click.ClickException as exc:
+        except (click.ClickException, StoreError) as exc:
             self._set_status(f"Error: {exc}")
             return False
 
@@ -698,8 +716,8 @@ class KanbanApp(App[None]):
         expected_tasks: tuple[TaskExpectation, ...] = (),
     ) -> None:
         try:
-            board, result = mutate_board(
-                self.config, operation, expected_tasks=expected_tasks
+            board, result = self.application.mutate(
+                operation, expected_tasks=expected_tasks
             )
             self.board = board
         except TaskConflict as exc:
@@ -710,7 +728,7 @@ class KanbanApp(App[None]):
                 "Board refreshed; review and retry."
             )
             return
-        except click.ClickException as exc:
+        except (click.ClickException, StoreError) as exc:
             self._set_status(f"Error: {exc}")
             return
 
@@ -731,7 +749,7 @@ class KanbanApp(App[None]):
         self._current_view().action_cursor_up()
 
     def action_add_task(self) -> None:
-        screen = AddTaskPromptScreen(self.config, self.palette)
+        screen = AddTaskPromptScreen(self.config, self.application, self.palette)
         self.push_screen(
             screen,
             lambda value: self._mutation_prompt_result(screen, value),
@@ -744,7 +762,9 @@ class KanbanApp(App[None]):
         self._open_task_prompt(task, "text")
 
     def _open_task_prompt(self, task: Task, field: Literal["text", "tags"]) -> None:
-        screen = TaskPromptScreen(self.config, task, field, self.palette)
+        screen = TaskPromptScreen(
+            self.config, self.application, task, field, self.palette
+        )
         self.push_screen(
             screen,
             lambda value: self._mutation_prompt_result(screen, value, task.id),
@@ -792,12 +812,13 @@ class KanbanApp(App[None]):
 
     def action_restore_task(self) -> None:
         try:
-            board = read_data(self.config)
-        except click.ClickException as exc:
+            board = self.application.read()
+        except (click.ClickException, StoreError) as exc:
             self._set_status(f"Error: {exc}")
             return
         self.push_screen(
-            ArchiveScreen(self.config, board, self.palette), self._archive_result
+            ArchiveScreen(self.config, self.application, board, self.palette),
+            self._archive_result,
         )
 
     async def _archive_result(self, result: tuple[Board, int] | None) -> None:
@@ -824,8 +845,8 @@ class KanbanApp(App[None]):
 
     async def action_undo(self) -> None:
         try:
-            self.board = undo_board(self.config)
-        except click.ClickException as exc:
+            self.board = self.application.undo()
+        except (click.ClickException, StoreError) as exc:
             self._set_status(str(exc))
             return
 
@@ -902,6 +923,11 @@ class KanbanApp(App[None]):
         self.push_screen(HelpScreen(self.palette))
 
 
-def run_tui(config: AppConfig, *, board_name: str = "default") -> None:
+def run_tui(
+    config: AppConfig,
+    *,
+    application: BoardApplication | None = None,
+    board_name: str = "default",
+) -> None:
     """Run the interactive kanbanTUI application."""
-    KanbanApp(config, board_name=board_name).run()
+    KanbanApp(config, application=application, board_name=board_name).run()
