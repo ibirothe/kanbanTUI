@@ -11,7 +11,7 @@ The runtime dependency set is deliberately small: Click, PyYAML, Rich, and Textu
 Production code lives under `src/kanban_tui/`:
 
 - `cli.py` — Click command surface, native prefix/board/theme completion, board/config selection, theme selection, transfer and undo wiring.
-- `config.py` — XDG/portable/legacy path resolution, named boards, YAML validation and atomic config writes.
+- `config.py` — XDG/portable/legacy path resolution, named boards, presentation-independent YAML validation and atomic config writes.
 - `resources.py` — shared canonical config/datastore/lock paths and collision checks.
 - `models.py` — typed domain model and business invariants.
 - `services.py` — task mutations and workflow/capacity business rules.
@@ -71,13 +71,15 @@ The filename stem is the theme name and must be a lowercase slug of at most 32 c
 
 Custom YAML has three supported top-level fields: optional `description`, optional `extends`, and optional `colors`. `extends` defaults to `nord` and may reference the Nord built-in theme only. This deliberately prevents custom-to-custom inheritance cycles. `colors` may override any subset of the semantic roles; omitted roles are inherited from the built-in parent. Supplied colors are restricted to explicit `#RRGGBB` values so Rich and Textual receive the same deterministic color representation. The `selection` and `selection_text` roles specifically control the active TUI row.
 
-Theme loading is strict: invalid YAML, unsupported top-level keys, unknown color roles, invalid colors, invalid filenames, invalid parents, and built-in-name collisions raise an actionable `ThemeError`. The error type is both a validation error and a Click exception, so config validation can wrap it with config-path context while direct theme commands produce normal CLI errors rather than tracebacks.
+Theme loading is strict: invalid YAML, unsupported top-level keys, unknown color roles, invalid colors, invalid filenames, invalid parents, and built-in-name collisions raise an actionable `ThemeError`. The error type is both a validation error and a Click exception, so explicit theme commands and styled adapters produce normal CLI errors rather than tracebacks.
+
+Base config validation normalizes and validates the selected theme name without resolving its palette or reading the custom-theme directory. This keeps datastore operations, export, config inspection, and plain/JSON output independent from presentation files. Explicit theme selection still resolves the candidate before writing it. Rich table/history rendering and TUI startup also resolve strictly because they require a palette; an unavailable selected custom theme therefore blocks only those styled entry points. Repaint is styled output and follows the same strict policy.
 
 The theme parameter validates through `get_theme()` at command invocation and calls `theme_names()` for completion. It does not pass an eagerly materialized sequence to `click.Choice`, keeping selection and completion synchronized with themes created after CLI import.
 
 The selected theme remains per board/config. `theme list`, `theme current`, `theme set`, and `config set theme` all operate on the currently selected default, named or explicit config; custom theme definitions themselves are user-global within the active XDG/portable root.
 
-Rich and Textual consume the same `Theme` object:
+Rich and Textual consume the same immutable `Theme` value. A TUI resolves it once during application construction and injects that instance into prompts, help and the archive list; later removal or corruption of the source file cannot invalidate the running session:
 
 - Rich column headers use TODO/WIP/DONE colors;
 - task priorities use priority-level colors;
@@ -193,7 +195,7 @@ Edit/tag dialogs retain their drafts on conflict and require explicit Ctrl+R rev
 
 Add, edit and tag dialogs submit through a shared transactional prompt. Validation and capacity failures return their service messages next to the focused input; lock and write failures use the same retry path. The draft remains unchanged and the input is disabled while one submission is applying, preventing duplicate confirmation. Only a successful operation dismisses the dialog. Escape dismisses without another transaction and the board refresh restores the prior task selection.
 
-The Textual TUI calls the same services and storage functions as the CLI. Validation, capacity rules, locking, undo, metadata normalization and ordering therefore have one implementation.
+The Textual TUI calls the same services and storage functions as the CLI. Validation, capacity rules, locking, undo, metadata normalization and ordering therefore have one implementation. Palette resolution is a presentation-adapter concern and is not part of these application paths.
 
 Prompt input is routed through shared service validation. A searchable archive picker restores tasks using the shared transaction boundary and keeps capacity errors in the dialog. Explicit Ctrl+R refreshes external changes without writing or acquiring a writer lock; failures retain the last valid display. Selection is restored by task ID after rebuilding columns, with a visible-task fallback. Only highlights in the focused list update selection tracking.
 

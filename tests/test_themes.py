@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -5,20 +6,20 @@ import click
 import pytest
 import yaml
 from textual.color import Color
-from textual.widgets import Static
+from textual.widgets import Input, ListView, Static
 
 from kanban_tui.cli import main
 from kanban_tui.config import get_board_config_path, get_config_path, validate_config
 from kanban_tui.models import AppConfig, Board, Task, TaskPriority, TaskState
 from kanban_tui.rendering import render_board, task_rich_text
-from kanban_tui.storage import datastore_lock, write_data
+from kanban_tui.storage import datastore_lock, read_data, write_data
 from kanban_tui.themes import (
     DEFAULT_THEME,
     get_theme,
     get_user_theme_dir,
     theme_names,
 )
-from kanban_tui.tui import KanbanApp
+from kanban_tui.tui import ArchiveScreen, HelpScreen, KanbanApp, PromptScreen
 
 STAMP = datetime(2026, 9, 5, 12, 0, tzinfo=timezone.utc)
 
@@ -127,10 +128,19 @@ def test_config_without_theme_defaults_to_nord(tmp_path):
     assert config.theme == "nord"
 
 
-def test_invalid_config_theme_is_rejected(tmp_path):
-    with pytest.raises(click.ClickException, match="unknown theme"):
+def test_unavailable_config_theme_is_preserved_without_loading(tmp_path):
+    config = validate_config(
+        {"data_path": str(tmp_path / "board.dat"), "theme": "missing"},
+        tmp_path / "config.yaml",
+    )
+
+    assert config.theme == "missing"
+
+
+def test_invalid_config_theme_name_is_rejected(tmp_path):
+    with pytest.raises(click.ClickException, match="theme names must be"):
         validate_config(
-            {"data_path": str(tmp_path / "board.dat"), "theme": "missing"},
+            {"data_path": str(tmp_path / "board.dat"), "theme": "Bad Name"},
             tmp_path / "config.yaml",
         )
 
@@ -334,3 +344,70 @@ async def test_tui_applies_custom_palette(write_config):
         assert app.palette.name == "ocean"
         assert app.palette.source == "custom"
         assert app.palette.accent == "#00aaff"
+
+
+@pytest.mark.parametrize("broken", ["missing", "invalid"])
+async def test_tui_session_keeps_resolved_palette_after_theme_file_breaks(
+    write_config, broken
+):
+    theme_path = write_user_theme(
+        "ocean",
+        {
+            "extends": "nord",
+            "colors": {"accent": "#00aaff"},
+        },
+    )
+    config = write_config()
+    config.theme = "ocean"
+    board = Board(
+        active={1: Task(1, TaskState.TODO, "active", STAMP, STAMP)},
+        deleted={2: Task(2, TaskState.DELETED, "archived", STAMP, STAMP)},
+    )
+    with datastore_lock(config):
+        write_data(config, board)
+    app = KanbanApp(config)
+    if broken == "missing":
+        theme_path.unlink()
+    else:
+        theme_path.write_text("colors: {accent: invalid}\n", encoding="utf-8")
+
+    async with app.run_test() as pilot:
+        await pilot.press("a")
+        assert isinstance(app.screen, PromptScreen)
+        await pilot.press("escape", "e")
+        assert isinstance(app.screen, PromptScreen)
+        await pilot.press("escape", "question_mark")
+        assert isinstance(app.screen, HelpScreen)
+        await pilot.press("escape", "r")
+        assert isinstance(app.screen, ArchiveScreen)
+        app.screen.query_one(Input).value = "archived"
+        await pilot.pause()
+        assert len(app.screen.query_one(ListView).children) == 1
+        assert app.palette.accent == "#00aaff"
+        await pilot.press("escape")
+
+
+@pytest.mark.parametrize("broken", ["missing", "invalid"])
+def test_unstyled_commands_ignore_unavailable_selected_theme(
+    runner, write_config, tmp_path, broken
+):
+    config = write_config()
+    theme_path = write_user_theme("ocean", {"extends": "nord"})
+    assert runner.invoke(main, ["theme", "set", "ocean"]).exit_code == 0
+    if broken == "missing":
+        theme_path.unlink()
+    else:
+        theme_path.write_text("colors: {accent: invalid}\n", encoding="utf-8")
+
+    added = runner.invoke(main, ["add", "still", "works"])
+    plain = runner.invoke(main, ["show", "--format", "plain"])
+    json_output = runner.invoke(main, ["show", "--format", "json"])
+    exported = runner.invoke(main, ["export", str(tmp_path / "board.json")])
+
+    assert added.exit_code == 0, added.output
+    assert plain.exit_code == 0, plain.output
+    assert "still works" in plain.output
+    assert json_output.exit_code == 0, json_output.output
+    assert json.loads(json_output.output)["tasks"][0]["text"] == "still works"
+    assert exported.exit_code == 0, exported.output
+    assert read_data(config).active[1].text == "still works"
