@@ -3,13 +3,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from .models import (
-    AppConfig,
     Board,
     Task,
     TaskPriority,
     TaskState,
     normalize_tag,
 )
+from .policy import BoardPolicy, count_state
 
 
 @dataclass
@@ -42,29 +42,21 @@ def _now(clock: Clock | None) -> datetime:
     return (clock or timestamp)()
 
 
-def _count_state(board: Board, state: TaskState) -> int:
-    return sum(1 for task in board.active.values() if task.state is state)
+def _state_limit(policy: BoardPolicy, state: TaskState) -> int | None:
+    return policy.state_limit(state)
 
 
-def _state_limit(config: AppConfig, state: TaskState) -> int | None:
-    if state is TaskState.TODO:
-        return config.limits.todo
-    if state is TaskState.IN_PROGRESS:
-        return config.limits.wip
-    return None
+def state_limit_reached(policy: BoardPolicy, board: Board, state: TaskState) -> bool:
+    limit = _state_limit(policy, state)
+    return limit is not None and limit <= count_state(board, state)
 
 
-def state_limit_reached(config: AppConfig, board: Board, state: TaskState) -> bool:
-    limit = _state_limit(config, state)
-    return limit is not None and limit <= _count_state(board, state)
+def wip_limit_reached(policy: BoardPolicy, board: Board) -> bool:
+    return state_limit_reached(policy, board, TaskState.IN_PROGRESS)
 
 
-def wip_limit_reached(config: AppConfig, board: Board) -> bool:
-    return state_limit_reached(config, board, TaskState.IN_PROGRESS)
-
-
-def todo_limit_reached(config: AppConfig, board: Board) -> bool:
-    return state_limit_reached(config, board, TaskState.TODO)
+def todo_limit_reached(policy: BoardPolicy, board: Board) -> bool:
+    return state_limit_reached(policy, board, TaskState.TODO)
 
 
 def _state_name(state: TaskState) -> str:
@@ -73,23 +65,23 @@ def _state_name(state: TaskState) -> str:
     return str(state.value).upper()
 
 
-def _capacity_error(config: AppConfig, board: Board, state: TaskState) -> str:
-    limit = _state_limit(config, state)
-    count = _count_state(board, state)
+def _capacity_error(policy: BoardPolicy, board: Board, state: TaskState) -> str:
+    limit = _state_limit(policy, state)
+    count = count_state(board, state)
     label = "WIP" if state is TaskState.IN_PROGRESS else "TODO"
     return f"Error: {label} limit reached ({count}/{limit})."
 
 
 def _validate_task_text(
-    config: AppConfig, raw_text: str
+    policy: BoardPolicy, raw_text: str
 ) -> tuple[str | None, str | None]:
     text = raw_text.strip()
     if not text:
         return None, "Error: task text cannot be empty."
-    if len(text) > config.limits.taskname:
+    if len(text) > policy.task_text_limit:
         return (
             None,
-            f"Error: task text exceeds limit ({len(text)}/{config.limits.taskname} characters).",
+            f"Error: task text exceeds limit ({len(text)}/{policy.task_text_limit} characters).",
         )
     return text, None
 
@@ -121,7 +113,7 @@ def _place_at_bottom(board: Board, task: Task, state: TaskState) -> None:
 
 
 def _transition_task(
-    config: AppConfig,
+    policy: BoardPolicy,
     board: Board,
     task: Task,
     target_state: TaskState,
@@ -129,8 +121,8 @@ def _transition_task(
 ) -> str | None:
     if task.state is target_state:
         return f"Error: task #{task.id} is already {_state_name(target_state)}."
-    if state_limit_reached(config, board, target_state):
-        return _capacity_error(config, board, target_state)
+    if state_limit_reached(policy, board, target_state):
+        return _capacity_error(policy, board, target_state)
 
     previous_state = task.state
     now = _now(clock)
@@ -149,7 +141,7 @@ def _transition_task(
 
 
 def add_tasks(
-    config: AppConfig,
+    policy: BoardPolicy,
     board: Board,
     tasks: Iterable[str],
     *,
@@ -167,14 +159,14 @@ def add_tasks(
         return result
 
     for raw_text in tasks:
-        text, error = _validate_task_text(config, raw_text)
+        text, error = _validate_task_text(policy, raw_text)
         if error is not None:
             result.failure(error)
             continue
         assert text is not None
 
-        if todo_limit_reached(config, board):
-            result.failure(_capacity_error(config, board, TaskState.TODO))
+        if todo_limit_reached(policy, board):
+            result.failure(_capacity_error(policy, board, TaskState.TODO))
             continue
 
         task_id = board.next_task_id()
@@ -195,7 +187,7 @@ def add_tasks(
 
 
 def edit_task(
-    config: AppConfig,
+    policy: BoardPolicy,
     board: Board,
     task_id: str,
     raw_text: str,
@@ -218,7 +210,7 @@ def edit_task(
         result.failure(f"Error: task #{numeric_id} does not exist.")
         return result
 
-    text, error = _validate_task_text(config, raw_text)
+    text, error = _validate_task_text(policy, raw_text)
     if error is not None:
         result.failure(error)
         return result
@@ -257,7 +249,7 @@ def delete_tasks(
 
 
 def restore_tasks(
-    config: AppConfig,
+    policy: BoardPolicy,
     board: Board,
     ids: Iterable[str],
     *,
@@ -280,8 +272,8 @@ def restore_tasks(
             result.failure(f"Error: archived task #{numeric_id} does not exist.")
             continue
 
-        if todo_limit_reached(config, board):
-            result.failure(_capacity_error(config, board, TaskState.TODO))
+        if todo_limit_reached(policy, board):
+            result.failure(_capacity_error(policy, board, TaskState.TODO))
             continue
 
         _place_at_bottom(board, task, TaskState.TODO)
@@ -295,7 +287,7 @@ def restore_tasks(
 
 
 def move_tasks_to_state(
-    config: AppConfig,
+    policy: BoardPolicy,
     board: Board,
     ids: Iterable[str],
     target_state: TaskState,
@@ -311,7 +303,7 @@ def move_tasks_to_state(
             continue
         assert task is not None
 
-        error = _transition_task(config, board, task, target_state, clock)
+        error = _transition_task(policy, board, task, target_state, clock)
         if error is not None:
             result.failure(error)
             continue
@@ -326,7 +318,7 @@ def move_tasks_to_state(
 
 
 def promote_tasks(
-    config: AppConfig,
+    policy: BoardPolicy,
     board: Board,
     ids: Iterable[str],
     *,
@@ -350,7 +342,7 @@ def promote_tasks(
             result.failure(f"Error: task #{task.id} is already DONE.")
             continue
 
-        error = _transition_task(config, board, task, target_state, clock)
+        error = _transition_task(policy, board, task, target_state, clock)
         if error is not None:
             result.failure(error)
         else:
@@ -360,7 +352,7 @@ def promote_tasks(
 
 
 def regress_tasks(
-    config: AppConfig,
+    policy: BoardPolicy,
     board: Board,
     ids: Iterable[str],
     *,
@@ -384,7 +376,7 @@ def regress_tasks(
             result.failure(f"Error: task #{task.id} is already TODO.")
             continue
 
-        error = _transition_task(config, board, task, target_state, clock)
+        error = _transition_task(policy, board, task, target_state, clock)
         if error is not None:
             result.failure(error)
         else:

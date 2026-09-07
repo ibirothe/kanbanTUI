@@ -10,8 +10,9 @@ from textual.widgets import Input, ListView, Static
 
 from kanban_tui.cli import main
 from kanban_tui.config import get_board_config_path, get_config_path, validate_config
-from kanban_tui.models import AppConfig, Board, Task, TaskPriority, TaskState
+from kanban_tui.models import Board, Task, TaskPriority, TaskState
 from kanban_tui.rendering import render_board, task_rich_text
+from kanban_tui.settings import AppConfig
 from kanban_tui.storage import datastore_lock, read_data, write_data
 from kanban_tui.themes import (
     DEFAULT_THEME,

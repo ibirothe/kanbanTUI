@@ -9,7 +9,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Input, Label, ListItem, ListView, Static
 
-from .models import AppConfig, Board, Task, TaskPriority, TaskState
+from .models import Board, Task, TaskPriority, TaskState
 from .rendering import column_label, task_rich_text, visible_tasks
 from .services import (
     OperationResult,
@@ -22,6 +22,7 @@ from .services import (
     set_task_priority,
     set_task_tags,
 )
+from .settings import AppConfig
 from .storage import read_data
 from .themes import Theme, get_theme
 from .transactions import TaskConflict, TaskExpectation, mutate_board, undo_board
@@ -195,7 +196,7 @@ class AddTaskPromptScreen(MutationPromptScreen):
         super().__init__(config, "Add task", palette)
 
     def _apply(self, board: Board, value: str) -> OperationResult:
-        return add_tasks(self.config, board, [value])
+        return add_tasks(self.config.policy, board, [value])
 
 
 class TaskPromptScreen(MutationPromptScreen):
@@ -223,7 +224,7 @@ class TaskPromptScreen(MutationPromptScreen):
     def _apply(self, board: Board, value: str) -> OperationResult:
         task_id = str(self.expected.task_id)
         if self.field == "text":
-            return edit_task(self.config, board, task_id, value)
+            return edit_task(self.config.policy, board, task_id, value)
         tags = [part.strip() for part in value.split(",") if part.strip()]
         return set_task_tags(board, task_id, tags)
 
@@ -393,7 +394,9 @@ class ArchiveScreen(ModalScreen[tuple[Board, int] | None]):
         try:
             board, result = mutate_board(
                 self.config,
-                lambda board: restore_tasks(self.config, board, [str(item.task_id)]),
+                lambda board: restore_tasks(
+                    self.config.policy, board, [str(item.task_id)]
+                ),
                 expected_tasks=(
                     TaskExpectation.capture(self.board.deleted[item.task_id]),
                 ),
@@ -504,7 +507,7 @@ class KanbanApp(App[None]):
         self.board_name = board_name
         self.title = f"kanbanTUI · {board_name}"
         self._refreshing = False
-        self.palette = get_theme(config.theme)
+        self.palette = get_theme(config.presentation.theme)
         self.board = Board()
         self.filter_text = ""
         self._last_list_id = "todo-list"
@@ -802,7 +805,7 @@ class KanbanApp(App[None]):
         raw_task_id = value.strip()
         focus_task_id = int(raw_task_id) if raw_task_id.isdecimal() else None
         await self._mutate(
-            lambda board: restore_tasks(self.config, board, [raw_task_id]),
+            lambda board: restore_tasks(self.config.policy, board, [raw_task_id]),
             focus_task_id=focus_task_id,
             focus_state=TaskState.TODO if focus_task_id is not None else None,
         )
@@ -850,7 +853,7 @@ class KanbanApp(App[None]):
         target_state = states[target_index]
         await self._mutate(
             lambda board: move_tasks_to_state(
-                self.config,
+                self.config.policy,
                 board,
                 [str(task.id)],
                 target_state,

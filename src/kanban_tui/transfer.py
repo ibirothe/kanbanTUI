@@ -7,7 +7,6 @@ import click
 
 from .atomic import atomic_text_writer
 from .models import (
-    AppConfig,
     Board,
     Task,
     TaskPriority,
@@ -170,31 +169,6 @@ def board_from_export(payload: Any) -> Board:
     board.normalize_positions(TaskState.TODO)
     board.normalize_positions(TaskState.IN_PROGRESS)
     return board
-
-
-def validate_imported_tasks(config: AppConfig, imported: Board) -> None:
-    """Validate config-dependent constraints for tasks coming from an export."""
-    for task in [*imported.active.values(), *imported.deleted.values()]:
-        if len(task.text) > config.limits.taskname:
-            raise click.ClickException(
-                "Imported task "
-                f"#{task.id} text exceeds limit "
-                f"({len(task.text)}/{config.limits.taskname} characters)."
-            )
-
-
-def validate_board_capacity(config: AppConfig, board: Board) -> None:
-    for state, limit, label in (
-        (TaskState.TODO, config.limits.todo, "TODO"),
-        (TaskState.IN_PROGRESS, config.limits.wip, "WIP"),
-    ):
-        if limit is None:
-            continue
-        count = sum(1 for task in board.active.values() if task.state is state)
-        if count > limit:
-            raise click.ClickException(
-                f"Imported board exceeds {label} limit ({count}/{limit})."
-            )
 
 
 def _remap_imported_ids(

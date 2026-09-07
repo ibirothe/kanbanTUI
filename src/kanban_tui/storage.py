@@ -9,8 +9,9 @@ import yaml
 
 from .atomic import atomic_text_writer
 from .codec import DatastoreDocument, dump_datastore, load_datastore
-from .models import AppConfig, Board
+from .models import Board
 from .resources import resolve_board_paths
+from .settings import AppConfig
 
 
 class _LockUnavailable(Exception):

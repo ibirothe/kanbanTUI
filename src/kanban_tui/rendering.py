@@ -8,13 +8,13 @@ from rich.table import Table
 from rich.text import Text
 
 from .models import (
-    AppConfig,
     Board,
     Task,
     TaskPriority,
     TaskState,
     format_timestamp,
 )
+from .settings import AppConfig
 from .themes import DEFAULT_THEME, Theme, get_theme
 
 SORT_CHOICES = ("default", "id", "created", "modified")
@@ -108,7 +108,7 @@ def visible_tasks(
             tag_filter=tag_filter,
         )
         if state is TaskState.DONE:
-            tasks = tasks[: config.limits.done]
+            tasks = tasks[: config.presentation.done_limit]
         visible.extend(tasks)
     return visible
 
@@ -151,7 +151,7 @@ def split_items(board: Board):
 
 def board_columns(config: AppConfig, board: Board):
     todos, inprogs, dones = split_items(board)
-    return todos, inprogs, dones[: config.limits.done]
+    return todos, inprogs, dones[: config.presentation.done_limit]
 
 
 def _task_payload(task: Task) -> dict[str, object]:
@@ -258,10 +258,10 @@ def column_label(
     shown = total if visible_count is None else visible_count
 
     if state is TaskState.TODO:
-        limit = config.limits.todo
+        limit = config.policy.todo_limit
         label = "TODO"
     elif state is TaskState.IN_PROGRESS:
-        limit = config.limits.wip
+        limit = config.policy.wip_limit
         label = "IN PROGRESS"
     else:
         limit = None
@@ -300,7 +300,7 @@ def _table_tasks(
             priority_filter=priority_filter,
             unprioritized_only=unprioritized_only,
             tag_filter=tag_filter,
-        )[: config.limits.done if state is TaskState.DONE else None]
+        )[: config.presentation.done_limit if state is TaskState.DONE else None]
         for state in [TaskState.TODO, TaskState.IN_PROGRESS, TaskState.DONE]
     }
 
@@ -352,7 +352,7 @@ def render_board(
     if output_format != "table":
         raise ValueError(f"unsupported output format: {output_format}")
 
-    theme = get_theme(config.theme)
+    theme = get_theme(config.presentation.theme)
     console = Console(no_color=bool(os.environ.get("NO_COLOR")))
     filtered = (
         state_filter is not None
@@ -373,7 +373,7 @@ def render_board(
             tag_filter=tag_filter,
         )
         if state_filter is TaskState.DONE:
-            tasks = tasks[: config.limits.done]
+            tasks = tasks[: config.presentation.done_limit]
         if not tasks:
             console.print("No matching tasks.")
             return
@@ -460,7 +460,9 @@ def render_board(
 
 
 def render_history(board: Board, config: AppConfig | None = None) -> None:
-    theme = get_theme(config.theme if config is not None else DEFAULT_THEME)
+    theme = get_theme(
+        config.presentation.theme if config is not None else DEFAULT_THEME
+    )
     table = Table(show_header=True)
     table.add_column("id", justify="right", style=theme.muted)
     table.add_column("task", style=theme.text)

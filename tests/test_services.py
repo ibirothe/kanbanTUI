@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
-from pathlib import Path
 
-from kanban_tui.models import AppConfig, Board, Limits, Task, TaskState
+from kanban_tui.models import Board, Task, TaskState
+from kanban_tui.policy import BoardPolicy
 from kanban_tui.services import (
     add_tasks,
     delete_tasks,
@@ -17,11 +17,10 @@ NOW = datetime(2026, 9, 4, 10, 0, tzinfo=timezone.utc)
 BEFORE = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
 
 
-def base_config(**limits):
-    return AppConfig(
-        data_path=Path("/tmp/unused"),
-        limits=Limits(**limits),
-        repaint=False,
+def base_config(**limits) -> BoardPolicy:
+    return BoardPolicy(
+        todo_limit=limits.get("todo"),
+        wip_limit=limits.get("wip"),
     )
 
 

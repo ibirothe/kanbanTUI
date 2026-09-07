@@ -5,8 +5,9 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 
-from .models import AppConfig, Board, Task, TaskPriority, TaskState
+from .models import Board, Task, TaskPriority, TaskState
 from .services import OperationResult
+from .settings import AppConfig
 from .storage import datastore_lock, read_data, undo_last_change, write_data
 
 

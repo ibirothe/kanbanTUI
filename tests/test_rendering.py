@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from kanban_tui.models import AppConfig, Board, Limits, Task, TaskState
+from kanban_tui.models import Board, Task, TaskState
 from kanban_tui.rendering import (
     board_columns,
     column_label,
@@ -10,6 +10,7 @@ from kanban_tui.rendering import (
     format_plain,
     split_items,
 )
+from kanban_tui.settings import AppConfig, Limits
 
 
 def stamp(hour: int):

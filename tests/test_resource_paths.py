@@ -15,7 +15,7 @@ from kanban_tui.config import (
     set_config_value,
     validate_config,
 )
-from kanban_tui.models import AppConfig
+from kanban_tui.settings import AppConfig
 from kanban_tui.storage import datastore_lock
 
 
@@ -119,7 +119,7 @@ def test_rejected_config_write_preserves_lock_against_second_process(tmp_path, e
                 "-c",
                 "import sys, click\n"
                 "from pathlib import Path\n"
-                "from kanban_tui.models import AppConfig\n"
+                "from kanban_tui.settings import AppConfig\n"
                 "from kanban_tui.storage import datastore_lock\n"
                 "try:\n"
                 "    with datastore_lock(AppConfig(Path(sys.argv[1]))):\n"
