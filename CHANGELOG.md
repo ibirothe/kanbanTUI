@@ -4,6 +4,7 @@
 
 ### Fixes and quality
 
+- make local import API outcomes unambiguous and return bounded actionable details for transfer-format and policy failures;
 - add an authenticated loopback HTTP import adapter with bounded JSON requests, stable responses and shared application transactions;
 - isolate the versioned board transfer payload codec and its errors from Click and filesystem adapters so additional transports can reuse the same validation;
 - route shared read, mutation, import and undo use cases through application-owned store/transaction protocols; provide a YAML adapter and an in-memory contract test double;

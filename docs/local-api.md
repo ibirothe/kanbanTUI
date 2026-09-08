@@ -67,14 +67,16 @@ machine administrator.
 Successful imports return HTTP 200, including semantic no-ops:
 
 ```json
-{"status":"changed","mode":"merge","changed":1,"unchanged":1,"id_mapping":{"1":2}}
+{"outcome":"changed","mode":"merge","id_mapping":{"1":2}}
 ```
 
-`changed` and `unchanged` count application result items, not tasks. The ID map
-contains string source IDs and integer destination IDs; it is empty when there
-are no collisions. Replace preserves imported IDs. Merge appends independent
-tasks and remaps collisions; it is not an upsert and repeated requests can add
-duplicates. Clients must not blindly retry a merge after an uncertain response.
+`outcome` is `changed` when the board was committed and `unchanged` for an
+accepted semantic no-op. The HTTP contract does not expose internal application
+result counters. The ID map contains string source IDs and integer destination
+IDs; it is empty when there are no collisions. Replace preserves imported IDs.
+Merge appends independent tasks and remaps collisions; it is not an upsert and
+repeated requests can add duplicates. Clients must not blindly retry a merge
+after an uncertain response.
 
 Errors have the shape `{"error":{"code":"store_unavailable"}}`:
 
@@ -89,6 +91,22 @@ Errors have the shape `{"error":{"code":"store_unavailable"}}`:
 | 422 | `policy_violation` |
 | 503 | `store_unavailable` (including writer-lock contention) |
 | 500 | `internal_error` |
+
+Transfer-format errors include a bounded, safe validation message:
+
+```json
+{"error":{"code":"invalid_import_format","message":"export must contain active and archived arrays"}}
+```
+
+Policy errors additionally identify the stable rule, configured limit and actual
+value. Task-specific rules also include the task ID:
+
+```json
+{"error":{"code":"policy_violation","message":"Imported task #1 text exceeds limit (48/40 characters).","rule":"task_text_limit","limit":40,"actual":48,"task_id":1}}
+```
+
+Storage and unexpected internal failures never include messages, filesystem
+paths, tracebacks or other implementation details.
 
 Unsupported HTTP methods use the server's 501 status with a JSON
 `invalid_request` error. Transport disconnects can prevent response delivery.
