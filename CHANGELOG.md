@@ -4,6 +4,7 @@
 
 ### Fixes and quality
 
+- make local HTTP imports optionally replay-safe with bounded hashed receipts committed atomically in YAML datastore schema 2;
 - identify the selected board when serving the local API and correlate sanitized server failures with secret-free local logs;
 - make local import API outcomes unambiguous and return bounded actionable details for transfer-format and policy failures;
 - add an authenticated loopback HTTP import adapter with bounded JSON requests, stable responses and shared application transactions;

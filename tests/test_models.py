@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from kanban_tui.codec import decode_board, encode_board
+from kanban_tui.codec import DATASTORE_SCHEMA_VERSION, decode_board, encode_board
 from kanban_tui.models import Board, Task, TaskState, parse_timestamp
 
 STAMP = datetime(2026, 9, 4, 10, 0, tzinfo=timezone.utc)
@@ -67,7 +67,10 @@ def test_iso_timestamp_and_position_round_trip_is_stable():
         position=4,
     )
     assert board.deleted[2].state is TaskState.DELETED
-    assert encode_board(board) == raw
+    assert encode_board(board) == {
+        **raw,
+        "schema_version": DATASTORE_SCHEMA_VERSION,
+    }
 
 
 def test_active_manual_order_uses_position_then_id():

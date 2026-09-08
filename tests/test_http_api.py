@@ -8,6 +8,7 @@ import pytest
 
 from kanban_tui.application import BoardApplication
 from kanban_tui.http_api import MAX_BODY_BYTES, ImportApi, create_server
+from kanban_tui.idempotency import MAX_IMPORT_RECEIPTS, digest_idempotency_key
 from kanban_tui.models import Board
 from kanban_tui.policy import BoardPolicy
 from kanban_tui.services import add_tasks
@@ -59,6 +60,22 @@ def request(
         connection.close()
 
 
+def request_with_duplicate_idempotency_key(port, body):
+    connection = HTTPConnection("127.0.0.1", port, timeout=3)
+    try:
+        connection.putrequest("POST", "/v1/board/import?mode=merge")
+        connection.putheader("Authorization", f"Bearer {TOKEN}")
+        connection.putheader("Content-Type", "application/json")
+        connection.putheader("Content-Length", str(len(body)))
+        connection.putheader("Idempotency-Key", "first")
+        connection.putheader("Idempotency-Key", "second")
+        connection.endheaders(body)
+        response = connection.getresponse()
+        return response.status, json.loads(response.read())
+    finally:
+        connection.close()
+
+
 def test_controller_merge_replace_noop_and_undo():
     store = MemoryBoardStore()
     app = BoardApplication(store)
@@ -90,6 +107,45 @@ def test_controller_merge_replace_noop_and_undo():
         == 200
     )
     assert not app.read().active
+
+
+def test_controller_replays_keyed_import_and_rejects_changed_request():
+    store = MemoryBoardStore()
+    api = ImportApi(BoardApplication(store), BoardPolicy(), token=TOKEN)
+    body = payload()
+
+    first = api.import_payload("merge", body, idempotency_key="request-1")
+    replay = api.import_payload("merge", body, idempotency_key="request-1")
+    conflict = api.import_payload(
+        "merge", payload("different"), idempotency_key="request-1"
+    )
+
+    assert first.status == 200
+    assert replay == first
+    assert conflict.status == 409
+    assert conflict.body == {"error": {"code": "idempotency_conflict"}}
+    assert store.commits == 1
+    assert len(store.board.active) == 1
+
+
+def test_keyed_import_receipts_are_bounded_and_store_only_key_digests():
+    store = MemoryBoardStore()
+    api = ImportApi(BoardApplication(store), BoardPolicy(), token=TOKEN)
+    body = payload()
+
+    for index in range(MAX_IMPORT_RECEIPTS + 1):
+        response = api.import_payload(
+            "replace",
+            body,
+            idempotency_key=f"request-{index}",
+        )
+        assert response.status == 200
+
+    assert len(store.import_receipts) == MAX_IMPORT_RECEIPTS
+    assert all(
+        "request-" not in receipt.key_digest for receipt in store.import_receipts
+    )
+    assert store.import_receipts[0].key_digest == digest_idempotency_key("request-1")
 
 
 @pytest.mark.parametrize(
@@ -141,6 +197,18 @@ def test_controller_returns_actionable_bounded_import_format_error():
     assert store.transactions == 0
 
 
+@pytest.mark.parametrize("key", ["", "has space", "\n", "ä", "x" * 129])
+def test_controller_rejects_invalid_idempotency_key(key):
+    store = MemoryBoardStore()
+    api = ImportApi(BoardApplication(store), BoardPolicy(), token=TOKEN)
+
+    response = api.import_payload("merge", payload(), idempotency_key=key)
+
+    assert response.status == 400
+    assert response.body == {"error": {"code": "invalid_idempotency_key"}}
+    assert store.transactions == 0
+
+
 def test_policy_and_commit_failure_preserve_state_and_release_lock():
     store = MemoryBoardStore()
     app = BoardApplication(FailOnceCommitStore(store))
@@ -163,6 +231,25 @@ def test_policy_and_commit_failure_preserve_state_and_release_lock():
     assert not store.board.active and not store.locked and store.previous is None
     assert api.import_payload("merge", payload("one")).status == 200
     assert not app.undo().active
+
+
+def test_failed_keyed_commit_records_neither_board_nor_receipt():
+    store = MemoryBoardStore()
+    api = ImportApi(
+        BoardApplication(FailOnceCommitStore(store)), BoardPolicy(), token=TOKEN
+    )
+    body = payload("one")
+
+    assert api.import_payload("merge", body, idempotency_key="request-1").status == 503
+    assert not store.board.active
+    assert store.import_receipts == []
+
+    success = api.import_payload("merge", body, idempotency_key="request-1")
+    replay = api.import_payload("merge", body, idempotency_key="request-1")
+    assert success.status == 200
+    assert replay == success
+    assert len(store.board.active) == 1
+    assert len(store.import_receipts) == 1
 
 
 def test_policy_capacity_error_exposes_stable_rule_and_counts():
@@ -263,6 +350,39 @@ def test_http_authentication_health_and_import(capsys):
     assert TOKEN not in capsys.readouterr().err
 
 
+def test_http_forwards_idempotency_key_without_logging_it():
+    store = MemoryBoardStore()
+    api = ImportApi(BoardApplication(store), BoardPolicy(), token=TOKEN)
+    logs = []
+    headers = {
+        "Authorization": f"Bearer {TOKEN}",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "client-secret-request-key",
+    }
+    body = payload()
+
+    with running(api, logger=logs.append) as port:
+        first = request(port, body, headers=headers)
+        replay = request(port, body, headers=headers)
+
+    assert first[0:2] == replay[0:2]
+    assert first[0] == 200
+    assert len(store.board.active) == 1
+    assert logs == []
+
+
+def test_http_rejects_duplicate_idempotency_key_headers_without_reading_body():
+    store = MemoryBoardStore()
+    api = ImportApi(BoardApplication(store), BoardPolicy(), token=TOKEN)
+
+    with running(api) as port:
+        status, body = request_with_duplicate_idempotency_key(port, payload())
+
+    assert status == 400
+    assert body == {"error": {"code": "invalid_idempotency_key"}}
+    assert store.transactions == 0
+
+
 @pytest.mark.parametrize(
     "path,extra,status",
     [
@@ -331,3 +451,24 @@ def test_http_yaml_lock_and_concurrent_imports(write_config):
         )
         assert [task.text for task in app.read().active.values()] == ["replacement"]
         assert len(app.undo().active) == 2
+
+
+def test_keyed_import_replays_after_yaml_store_restart(write_config):
+    config = write_config()
+    body = payload()
+    first_api = ImportApi(
+        BoardApplication(YamlBoardStore(config)), config.policy, token=TOKEN
+    )
+
+    first = first_api.import_payload("merge", body, idempotency_key="restart-safe")
+    restarted_api = ImportApi(
+        BoardApplication(YamlBoardStore(config)), config.policy, token=TOKEN
+    )
+    replay = restarted_api.import_payload("merge", body, idempotency_key="restart-safe")
+
+    assert first.status == 200
+    assert replay == first
+    assert len(restarted_api.application.read().active) == 1
+    raw = config.data_path.read_text(encoding="utf-8")
+    assert "restart-safe" not in raw
+    assert digest_idempotency_key("restart-safe") in raw

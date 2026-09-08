@@ -4,8 +4,9 @@ from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
-from typing import ContextManager, Protocol
+from typing import ContextManager, Protocol, runtime_checkable
 
+from .idempotency import ImportReceipt
 from .imports import ImportMode, merge_boards
 from .models import Board, Task, TaskPriority, TaskState
 from .policy import BoardPolicy, validate_imported_board
@@ -22,6 +23,17 @@ class BoardTransaction(Protocol):
     def undo(self) -> Board: ...
 
 
+@runtime_checkable
+class IdempotentBoardTransaction(BoardTransaction, Protocol):
+    """Optional transaction capability for atomic board/import receipts."""
+
+    def find_import_receipt(self, key_digest: str) -> ImportReceipt | None: ...
+
+    def commit_import(
+        self, board: Board, *, previous: Board, receipt: ImportReceipt
+    ) -> None: ...
+
+
 class BoardStore(Protocol):
     """Application-owned persistence port."""
 
@@ -32,6 +44,10 @@ class BoardStore(Protocol):
 
 class StoreError(Exception):
     """Infrastructure failure translated at the application port boundary."""
+
+
+class IdempotencyConflict(Exception):
+    """One idempotency key was reused for a different import request."""
 
 
 @dataclass(frozen=True)
@@ -120,32 +136,103 @@ class BoardApplication:
         validate_imported_board(policy, imported)
 
         def apply_import(current: Board) -> OperationResult:
-            if selected_mode is ImportMode.REPLACE:
-                target = deepcopy(imported)
-                remapped: dict[int, int] = {}
-            else:
-                target, remapped = merge_boards(current, imported)
-
-            result = OperationResult()
-            if target == current:
-                result.no_change(OperationCode.IMPORT_UNCHANGED)
-                return result
-
-            validate_imported_board(policy, target)
-            current.active, current.deleted = target.active, target.deleted
-            result.change(
-                OperationCode.IMPORT_COMPLETED,
-                text=source,
-                action=selected_mode.value,
+            return self._apply_import(
+                policy, current, imported, selected_mode, source=source
             )
-            if remapped:
-                result.no_change(
-                    OperationCode.IDS_REMAPPED,
-                    id_mapping=tuple(sorted(remapped.items())),
-                )
-            return result
 
         return self.mutate(apply_import)
+
+    def import_board_once(
+        self,
+        policy: BoardPolicy,
+        imported: Board,
+        mode: ImportMode | str,
+        *,
+        key_digest: str,
+        request_digest: str,
+    ) -> tuple[Board, OperationResult]:
+        """Apply or replay one import atomically with its durable receipt."""
+        selected_mode = ImportMode(mode)
+        with self.store.transaction() as base_transaction:
+            if not isinstance(base_transaction, IdempotentBoardTransaction):
+                raise StoreError("Store does not support idempotent imports.")
+            transaction = base_transaction
+            board = transaction.load()
+            existing = transaction.find_import_receipt(key_digest)
+            if existing is not None:
+                if existing.request_digest != request_digest:
+                    raise IdempotencyConflict
+                return board, self._result_from_receipt(existing)
+
+            validate_imported_board(policy, imported)
+            previous = deepcopy(board)
+            result = self._apply_import(policy, board, imported, selected_mode)
+            changed = bool(result.changed and board != previous)
+            if not changed:
+                board = previous
+            receipt = ImportReceipt(
+                key_digest=key_digest,
+                request_digest=request_digest,
+                mode=selected_mode.value,
+                changed=changed,
+                id_mapping=tuple(
+                    sorted(
+                        (source_id, destination_id)
+                        for item in result.items
+                        for source_id, destination_id in item.id_mapping
+                    )
+                ),
+            )
+            transaction.commit_import(board, previous=previous, receipt=receipt)
+        return board, result
+
+    @staticmethod
+    def _apply_import(
+        policy: BoardPolicy,
+        current: Board,
+        imported: Board,
+        selected_mode: ImportMode,
+        *,
+        source: str | None = None,
+    ) -> OperationResult:
+        if selected_mode is ImportMode.REPLACE:
+            target = deepcopy(imported)
+            remapped: dict[int, int] = {}
+        else:
+            target, remapped = merge_boards(current, imported)
+
+        result = OperationResult()
+        if target == current:
+            result.no_change(OperationCode.IMPORT_UNCHANGED)
+            return result
+
+        validate_imported_board(policy, target)
+        current.active, current.deleted = target.active, target.deleted
+        result.change(
+            OperationCode.IMPORT_COMPLETED,
+            text=source,
+            action=selected_mode.value,
+        )
+        if remapped:
+            result.no_change(
+                OperationCode.IDS_REMAPPED,
+                id_mapping=tuple(sorted(remapped.items())),
+            )
+        return result
+
+    @staticmethod
+    def _result_from_receipt(receipt: ImportReceipt) -> OperationResult:
+        result = OperationResult()
+        if receipt.changed:
+            result.change(OperationCode.IMPORT_COMPLETED, action=receipt.mode)
+        else:
+            result.no_change(OperationCode.IMPORT_UNCHANGED)
+        if receipt.id_mapping:
+            result.no_change(
+                OperationCode.IDS_REMAPPED,
+                id_mapping=receipt.id_mapping,
+            )
+        return result
 
     def undo(self) -> Board:
         with self.store.transaction() as transaction:

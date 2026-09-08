@@ -6,12 +6,14 @@ import yaml
 
 from kanban_tui.codec import (
     DATASTORE_SCHEMA_VERSION,
+    IMPORT_RECEIPTS_KEY,
     decode_board,
     decode_datastore,
     encode_board,
     encode_datastore,
     load_datastore,
 )
+from kanban_tui.idempotency import ImportReceipt
 from kanban_tui.models import Board, Task, TaskPriority, TaskState
 
 STAMP = datetime(2026, 9, 6, 12, 0, 0, 123456, tzinfo=timezone.utc)
@@ -90,6 +92,35 @@ def test_legacy_undo_is_decoded_and_reencoded_with_versions():
     assert document.previous == Board()
     assert encoded["schema_version"] == DATASTORE_SCHEMA_VERSION
     assert encoded["_undo"]["schema_version"] == DATASTORE_SCHEMA_VERSION
+
+
+def test_import_receipts_round_trip_in_current_datastore_schema():
+    receipt = ImportReceipt(
+        key_digest="a" * 64,
+        request_digest="b" * 64,
+        mode="merge",
+        changed=True,
+        id_mapping=((1, 2),),
+    )
+
+    encoded = encode_datastore(Board(), import_receipts=(receipt,))
+    document = decode_datastore(encoded)
+
+    assert encoded["schema_version"] == 2
+    assert encoded[IMPORT_RECEIPTS_KEY][0]["outcome"] == "changed"
+    assert document.import_receipts == (receipt,)
+
+
+def test_legacy_schema_cannot_claim_import_receipts():
+    with pytest.raises(ValueError, match="import receipts require schema_version 2"):
+        decode_datastore(
+            {
+                "schema_version": 1,
+                "data": {},
+                "deleted": {},
+                IMPORT_RECEIPTS_KEY: [],
+            }
+        )
 
 
 @pytest.mark.parametrize(

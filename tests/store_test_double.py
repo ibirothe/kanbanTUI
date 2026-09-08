@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 
 from kanban_tui.application import BoardStore, BoardTransaction, StoreError
+from kanban_tui.idempotency import MAX_IMPORT_RECEIPTS, ImportReceipt
 from kanban_tui.models import Board
 
 
@@ -28,6 +29,30 @@ class MemoryBoardTransaction:
         self.store.previous = None
         return restored
 
+    def find_import_receipt(self, key_digest: str) -> ImportReceipt | None:
+        return next(
+            (
+                receipt
+                for receipt in reversed(self.store.import_receipts)
+                if receipt.key_digest == key_digest
+            ),
+            None,
+        )
+
+    def commit_import(
+        self, board: Board, *, previous: Board, receipt: ImportReceipt
+    ) -> None:
+        self.store.commits += 1
+        if receipt.changed:
+            self.store.board = deepcopy(board)
+            self.store.previous = deepcopy(previous)
+        receipts = [
+            existing
+            for existing in self.store.import_receipts
+            if existing.key_digest != receipt.key_digest
+        ]
+        self.store.import_receipts = [*receipts, receipt][-MAX_IMPORT_RECEIPTS:]
+
 
 class MemoryBoardStore:
     def __init__(self, board: Board | None = None) -> None:
@@ -39,6 +64,7 @@ class MemoryBoardStore:
         self.commits = 0
         self.undos = 0
         self.locked = False
+        self.import_receipts: list[ImportReceipt] = []
 
     def read(self) -> Board:
         self.reads += 1
@@ -72,6 +98,15 @@ class RecordingTransaction:
     def undo(self) -> Board:
         self.store.undos += 1
         return self.inner.undo()
+
+    def find_import_receipt(self, key_digest: str) -> ImportReceipt | None:
+        return self.inner.find_import_receipt(key_digest)
+
+    def commit_import(
+        self, board: Board, *, previous: Board, receipt: ImportReceipt
+    ) -> None:
+        self.store.commits += 1
+        self.inner.commit_import(board, previous=previous, receipt=receipt)
 
 
 class RecordingStore:
@@ -110,6 +145,17 @@ class FailOnceTransaction:
 
     def undo(self) -> Board:
         return self.inner.undo()
+
+    def find_import_receipt(self, key_digest: str) -> ImportReceipt | None:
+        return self.inner.find_import_receipt(key_digest)
+
+    def commit_import(
+        self, board: Board, *, previous: Board, receipt: ImportReceipt
+    ) -> None:
+        self.store.attempts += 1
+        if self.store.attempts == 1:
+            raise StoreError("simulated write failure")
+        self.inner.commit_import(board, previous=previous, receipt=receipt)
 
 
 class FailOnceCommitStore:

@@ -41,6 +41,7 @@ For example, import an existing export file:
 curl --fail-with-body \
   -H "Authorization: Bearer $KANBAN_TUI_API_TOKEN" \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: nightly-board-import-2026-09-08" \
   --data-binary @board.json \
   "http://127.0.0.1:8765/v1/board/import?mode=merge"
 ```
@@ -57,10 +58,27 @@ checks happen before reading the body. Connections have a five-second socket
 inactivity timeout and close after one request. Requests are served serially;
 other CLI/TUI processes continue to coordinate through the existing datastore lock.
 
+`Idempotency-Key` is optional. A key must occur at most once and contain 1 to 128
+printable ASCII characters without whitespace. Retrying the exact same mode and
+body with the same key returns the original successful response without another
+board mutation. Reusing the key with a byte-different body or another mode returns
+HTTP 409 `idempotency_conflict`.
+
+Successful keyed results survive server restarts because the key digest, request
+digest and application result are committed in the same YAML document as the
+board. The clear-text key is never stored. The latest 128 receipts are retained;
+after the oldest receipt is evicted, that key is treated as new. Undo preserves
+receipts, so retrying an undone keyed import does not reapply it.
+
+Requests without the header retain the original behavior: replace remains a
+semantic no-op when the imported board is already current, while repeated merge
+requests can append duplicate tasks.
+
 Tokens must be nonempty printable ASCII without whitespace. Callers should supply
 a randomly generated secret. Authorization uses a constant-time byte comparison.
-The adapter emits no request logs and no CORS headers. Responses have `no-store`
-caching and never include exception messages, filesystem paths or tracebacks.
+The adapter emits no access logs and no CORS headers. Responses have `no-store`
+caching and never include internal exception messages, filesystem paths or
+tracebacks.
 Loopback limits network reach; the token limits callers who can perform imports.
 Environment variables can be read by sufficiently privileged local processes; the
 token is authentication between cooperating local clients, not isolation from the
@@ -86,7 +104,8 @@ Errors have the shape `{"error":{"code":"store_unavailable"}}`:
 
 | Status | Codes / meaning |
 | --- | --- |
-| 400 | `invalid_json`, `invalid_import_format`, `invalid_mode`, `invalid_framing`, `incomplete_body`, `invalid_request` |
+| 400 | `invalid_json`, `invalid_import_format`, `invalid_mode`, `invalid_idempotency_key`, `invalid_framing`, `incomplete_body`, `invalid_request` |
+| 409 | `idempotency_conflict`; the key belongs to another mode or payload |
 | 401 | `unauthorized`; includes `WWW-Authenticate: Bearer` |
 | 404 | `not_found` |
 | 408 | `request_timeout` during body read |

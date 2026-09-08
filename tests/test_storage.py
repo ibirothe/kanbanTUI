@@ -5,6 +5,7 @@ import pytest
 import yaml
 
 from kanban_tui.cli import main
+from kanban_tui.codec import DATASTORE_SCHEMA_VERSION
 from kanban_tui.models import Board, Task, TaskState
 from kanban_tui.storage import datastore_lock, read_data, write_data
 
@@ -53,7 +54,7 @@ def test_write_data_round_trip_uses_iso_timestamps(write_config):
 
     raw = yaml.safe_load(config.data_path.read_text(encoding="utf-8"))
     assert loaded == board
-    assert raw["schema_version"] == 1
+    assert raw["schema_version"] == DATASTORE_SCHEMA_VERSION
     assert raw["data"][1][2] == "2026-09-04T10:00:00+00:00"
     assert raw["data"][1][3] == "2026-09-04T09:00:00+00:00"
 
