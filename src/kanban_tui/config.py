@@ -7,6 +7,7 @@ import click
 import yaml
 
 from .atomic import atomic_text_writer
+from .deprecations import warn_legacy_api
 from .resources import resolve_board_paths
 from .settings import AppConfig, Limits
 from .themes import DEFAULT_THEME, get_theme, normalize_theme_name
@@ -46,7 +47,11 @@ def get_data_root() -> Path:
 
 
 def get_app_home() -> Path:
-    """Return the application root used for portable/legacy callers."""
+    """Return the legacy combined home, retained until version 1.0.0."""
+    warn_legacy_api(
+        "kanban_tui.config.get_app_home()",
+        "get_config_root() and get_data_root()",
+    )
     return get_config_root()
 
 

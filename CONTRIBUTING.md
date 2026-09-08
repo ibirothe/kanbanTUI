@@ -54,13 +54,14 @@ relevant to your contribution.
 | --- | --- |
 | Task invariants and persistence schema | `src/kanban_tui/models.py` |
 | Mutations, ordering and capacity rules | `src/kanban_tui/services.py` |
-| Mutation transaction boundaries | `src/kanban_tui/transactions.py` |
+| Use cases and transaction ports | `src/kanban_tui/application.py` |
 | Datastore locking and undo | `src/kanban_tui/storage.py` |
 | Atomic text-file replacement | `src/kanban_tui/atomic.py` |
 | Paths, named boards and config validation | `src/kanban_tui/config.py` |
 | CLI commands and terminal interaction | `src/kanban_tui/cli.py`, `src/kanban_tui/tui.py` |
 | Presentation and palettes | `src/kanban_tui/rendering.py`, `src/kanban_tui/themes.py` |
-| Import and export | `src/kanban_tui/transfer.py` |
+| Import/export payloads and merging | `src/kanban_tui/transfer_format.py`, `src/kanban_tui/imports.py` |
+| Import/export file I/O | `src/kanban_tui/transfer.py` |
 | Behavioral regression tests | `tests/` |
 
 Read the [architecture](docs/architecture.md) before changing persistence or

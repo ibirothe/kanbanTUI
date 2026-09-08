@@ -94,7 +94,8 @@ def test_lock_is_released_after_exception(write_config):
 def test_initialize_missing_flag_no_longer_changes_read_behavior(write_config):
     config = write_config()
 
-    board = read_data(config, initialize_missing=True)
+    with pytest.warns(DeprecationWarning, match="removed in kanbanTUI 1.0.0"):
+        board = read_data(config, initialize_missing=True)
 
     assert board == Board()
     assert not config.data_path.exists()

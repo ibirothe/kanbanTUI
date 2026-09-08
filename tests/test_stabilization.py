@@ -17,8 +17,8 @@ from kanban_tui.services import (
     set_task_priority,
     set_task_tags,
 )
-from kanban_tui.transactions import mutate_board, undo_board
-from kanban_tui.transfer import board_from_export, export_payload
+from kanban_tui.transfer_format import board_from_export, export_payload
+from tests.application_test_support import yaml_application
 
 T09 = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
 T10 = datetime(2026, 9, 4, 10, 0, tzinfo=timezone.utc)
@@ -122,32 +122,28 @@ def test_leaving_and_reentering_done_refreshes_completion_time(write_config):
 
 def test_undo_restores_precise_done_order(write_config):
     config = write_config()
-    mutate_board(
-        config,
+    yaml_application(config).mutate(
         lambda board: add_tasks(
             config.policy, board, ["later", "earlier"], clock=lambda: T09
         ),
     )
-    mutate_board(
-        config,
+    yaml_application(config).mutate(
         lambda board: move_tasks_to_state(
             config.policy, board, ["2"], TaskState.DONE, clock=lambda: T10_EARLY
         ),
     )
-    mutate_board(
-        config,
+    yaml_application(config).mutate(
         lambda board: move_tasks_to_state(
             config.policy, board, ["1"], TaskState.DONE, clock=lambda: T10_LATE
         ),
     )
-    mutate_board(
-        config,
+    yaml_application(config).mutate(
         lambda board: set_task_priority(
             board, "1", TaskPriority.HIGH, clock=lambda: T11
         ),
     )
 
-    restored = undo_board(config)
+    restored = yaml_application(config).undo()
 
     assert [task.id for task in restored.ordered_tasks(TaskState.DONE)] == [1, 2]
     assert restored.active[1].completed_at == T10_LATE

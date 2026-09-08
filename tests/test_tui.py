@@ -32,7 +32,7 @@ async def test_tui_initial_selection_and_state_movement(write_config):
         assert app._last_list_id == "inprogress-list"
         assert app.query_one("#inprogress-list", ListView).index == 0
 
-    persisted = read_data(config, initialize_missing=False)
+    persisted = read_data(config)
     assert persisted.active[1].state is TaskState.IN_PROGRESS
 
 
@@ -87,14 +87,14 @@ async def test_tui_keyboard_reprioritizes_selected_task(write_config):
         ]
         assert app._selected_task().id == 2
 
-    persisted = read_data(config, initialize_missing=False)
+    persisted = read_data(config)
     assert [task.id for task in persisted.ordered_tasks(TaskState.TODO)] == [2, 1, 3]
 
 
 async def test_tui_capacity_rejection_keeps_focus_and_state(write_config):
     config = write_config(limits={"wip": 1})
     seed_board(config, "one", "two")
-    board = read_data(config, initialize_missing=False)
+    board = read_data(config)
     board.active[1].state = TaskState.IN_PROGRESS
     board.active[1].position = 1
     board.active[2].position = 1
@@ -131,7 +131,7 @@ async def test_tui_invalid_restore_id_is_reported_without_crashing(write_config)
         assert app.board.active[1].text == "task"
         assert app._selected_task().id == 1
 
-    persisted = read_data(config, initialize_missing=False)
+    persisted = read_data(config)
     assert persisted.active[1].text == "task"
 
 
@@ -151,5 +151,5 @@ async def test_tui_undo_shortcut_restores_previous_board(write_config):
         assert app.board.active[1].state is TaskState.TODO
         assert app._selected_task().id == 1
 
-    persisted = read_data(config, initialize_missing=False)
+    persisted = read_data(config)
     assert persisted.active[1].state is TaskState.TODO

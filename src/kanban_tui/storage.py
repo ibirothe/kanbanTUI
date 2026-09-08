@@ -11,6 +11,7 @@ import yaml
 from .application import BoardTransaction, StoreError
 from .atomic import atomic_text_writer
 from .codec import DatastoreDocument, dump_datastore, load_datastore
+from .deprecations import warn_legacy_api
 from .idempotency import MAX_IMPORT_RECEIPTS, ImportReceipt
 from .models import Board
 from .resources import resolve_board_paths
@@ -143,8 +144,13 @@ def _atomic_write_document(
         ) from exc
 
 
-def read_data(config: AppConfig, *, initialize_missing: bool = False) -> Board:
-    """Read the datastore without creating files or emitting user-facing output."""
+def read_data(config: AppConfig, *, initialize_missing: bool | None = None) -> Board:
+    """Read without side effects; ``initialize_missing`` leaves in 1.0.0."""
+    if initialize_missing is not None:
+        warn_legacy_api(
+            "read_data(..., initialize_missing=...)",
+            "read_data(config) for side-effect-free reads",
+        )
     data_path = config.data_path
     try:
         document = _read_document(data_path)
@@ -264,7 +270,7 @@ class YamlBoardStore:
 
     def read(self) -> Board:
         try:
-            return read_data(self.config, initialize_missing=False)
+            return read_data(self.config)
         except click.ClickException as exc:
             raise StoreError(str(exc)) from exc
 

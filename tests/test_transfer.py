@@ -7,17 +7,16 @@ import pytest
 
 from kanban_tui.cli import main
 from kanban_tui.config import get_config_path
+from kanban_tui.imports import merge_boards
 from kanban_tui.models import Board, Task, TaskState
 from kanban_tui.policy import PolicyViolation, validate_imported_board
 from kanban_tui.storage import read_data
-from kanban_tui.transfer import (
+from kanban_tui.transfer import read_export, write_export
+from kanban_tui.transfer_format import (
     EXPORT_FORMAT,
     EXPORT_VERSION,
     board_from_export,
     export_payload,
-    merge_boards,
-    read_export,
-    write_export,
 )
 
 STAMP = datetime(2026, 9, 4, 10, 0, tzinfo=timezone.utc)
