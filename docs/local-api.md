@@ -14,6 +14,10 @@ kanban-tui --board work serve-api --port 8765
 kanban-tui --config ./board.yaml serve-api --port 8765
 ```
 
+The startup message repeats the selected board (or explicit configuration file
+name) together with the bound loopback address so the mutation target is visible
+before requests are accepted.
+
 The command resolves configuration, policy and datastore once at startup. Restart
 it after changing the selected configuration. It runs in the foreground and stops
 cleanly on Ctrl+C. Port 8765 is the default; port 0 lets the OS select an available
@@ -107,6 +111,16 @@ value. Task-specific rules also include the task ID:
 
 Storage and unexpected internal failures never include messages, filesystem
 paths, tracebacks or other implementation details.
+
+Every `5xx` response includes a server-generated request ID, for example:
+
+```json
+{"error":{"code":"internal_error","request_id":"31f7d1d630d27da4"}}
+```
+
+The same ID is written to stderr with only the HTTP status and exception type.
+Request targets, authorization headers, payloads, exception messages and storage
+paths are never logged. Expected `4xx` responses do not create log entries.
 
 Unsupported HTTP methods use the server's 501 status with a JSON
 `invalid_request` error. Transport disconnects can prevent response delivery.

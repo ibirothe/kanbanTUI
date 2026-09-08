@@ -628,6 +628,14 @@ def tui_command():
     run_tui(config, application=application, board_name=identity)
 
 
+def _selected_board_identity() -> str:
+    params = click.get_current_context().find_root().params
+    explicit = params.get("config_path")
+    if isinstance(explicit, Path):
+        return f"config: {explicit.name}"
+    return str(params.get("board_name") or "default")
+
+
 @main.command(name="serve-api")
 @click.option(
     "--port",
@@ -637,7 +645,11 @@ def tui_command():
     help="Local TCP port; use 0 to let the OS select one.",
 )
 def api_command(port):
-    """Serve the selected board's import API on IPv4 loopback."""
+    """Serve the selected board's import API on IPv4 loopback.
+
+    Requires KANBAN_TUI_API_TOKEN in the environment. The server never binds to
+    an external interface.
+    """
     token = os.environ.get("KANBAN_TUI_API_TOKEN")
     if token is None:
         raise click.ClickException(
@@ -656,7 +668,10 @@ def api_command(port):
     try:
         with server:
             bound_port = server.server_address[1]
-            click.echo(f"Serving local API on http://127.0.0.1:{bound_port}")
+            identity = _selected_board_identity()
+            click.echo(
+                f"Serving local API for {identity!r} on http://127.0.0.1:{bound_port}"
+            )
             try:
                 server.serve_forever()
             except KeyboardInterrupt:

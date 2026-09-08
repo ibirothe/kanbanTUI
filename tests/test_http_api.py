@@ -25,8 +25,8 @@ def payload(text="incoming"):
 
 
 @contextmanager
-def running(api):
-    with create_server(api) as server:
+def running(api, *, logger=None):
+    with create_server(api, logger=logger) as server:
         thread = Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01})
         thread.start()
         try:
@@ -196,6 +196,33 @@ def test_unexpected_error_is_sanitized():
     assert response.body == {"error": {"code": "internal_error"}}
 
 
+def test_http_internal_error_has_correlating_sanitized_log():
+    class BrokenApplication(BoardApplication):
+        def import_board(self, *args, **kwargs):
+            raise RuntimeError("secret path, token and payload")
+
+    logs = []
+    api = ImportApi(BrokenApplication(MemoryBoardStore()), BoardPolicy(), token=TOKEN)
+    with running(api, logger=logs.append) as port:
+        status, body, _ = request(port, payload())
+
+    request_id = body["error"]["request_id"]
+    assert status == 500
+    assert body == {
+        "error": {
+            "code": "internal_error",
+            "request_id": request_id,
+        }
+    }
+    assert isinstance(request_id, str) and len(request_id) == 16
+    int(request_id, 16)
+    assert logs == [f"local-api request_id={request_id} status=500 error=RuntimeError"]
+    assert not any(
+        secret in logs[0]
+        for secret in (TOKEN, "secret path", "payload", "/v1/board/import")
+    )
+
+
 @pytest.mark.parametrize("token", ["", "has space", "\n", "ä"])
 def test_invalid_token_rejected(token):
     with pytest.raises(ValueError):
@@ -257,7 +284,8 @@ def test_http_authentication_health_and_import(capsys):
 def test_http_rejections_do_not_write(path, extra, status):
     store = MemoryBoardStore()
     api = ImportApi(BoardApplication(store), BoardPolicy(), token=TOKEN)
-    with running(api) as port:
+    logs = []
+    with running(api, logger=logs.append) as port:
         headers = {
             "Authorization": f"Bearer {TOKEN}",
             "Content-Type": "application/json",
@@ -265,6 +293,7 @@ def test_http_rejections_do_not_write(path, extra, status):
         }
         assert request(port, payload(), path=path, headers=headers)[0] == status
     assert store.transactions == 0
+    assert logs == []
 
 
 def test_http_yaml_lock_and_concurrent_imports(write_config):
@@ -272,9 +301,21 @@ def test_http_yaml_lock_and_concurrent_imports(write_config):
     app = BoardApplication(YamlBoardStore(config))
     api = ImportApi(app, config.policy, token=TOKEN)
     body = payload()
-    with running(api) as port:
+    logs = []
+    with running(api, logger=logs.append) as port:
         with datastore_lock(config):
-            assert request(port, body)[0] == 503
+            status, response_body, _ = request(port, body)
+            assert status == 503
+            request_id = response_body["error"]["request_id"]
+            assert response_body == {
+                "error": {
+                    "code": "store_unavailable",
+                    "request_id": request_id,
+                }
+            }
+            assert logs == [
+                f"local-api request_id={request_id} status=503 error=StoreError"
+            ]
             assert not config.data_path.exists()
         with ThreadPoolExecutor(max_workers=2) as executor:
             responses = list(executor.map(lambda _: request(port, body), range(2)))
