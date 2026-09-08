@@ -2,6 +2,7 @@
 
 import hmac
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlsplit
@@ -20,8 +21,25 @@ class ApiResponse:
     body: dict[str, object]
 
 
-def error(status: int, code: str) -> ApiResponse:
-    return ApiResponse(status, {"error": {"code": code}})
+def error(
+    status: int,
+    code: str,
+    *,
+    message: str | None = None,
+    details: Mapping[str, object] | None = None,
+) -> ApiResponse:
+    error_body: dict[str, object] = {"code": code}
+    if message is not None:
+        error_body["message"] = message
+    if details is not None:
+        error_body.update(details)
+    return ApiResponse(status, {"error": error_body})
+
+
+def _safe_validation_message(error: ValueError, *, limit: int = 400) -> str:
+    """Bound client-owned validation details without exposing internal failures."""
+    message = str(error)
+    return message if len(message) <= limit else f"{message[: limit - 3]}..."
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -71,12 +89,31 @@ class ImportApi:
             return error(400, "invalid_json")
         try:
             imported = board_from_export(payload)
-        except TransferFormatError:
-            return error(400, "invalid_import_format")
+        except TransferFormatError as exc:
+            return error(
+                400,
+                "invalid_import_format",
+                message=_safe_validation_message(exc),
+            )
         try:
             _, result = self.application.import_board(self.policy, imported, selected)
-        except PolicyViolation:
-            return error(422, "policy_violation")
+        except PolicyViolation as exc:
+            details = {
+                key: value
+                for key, value in {
+                    "rule": exc.rule,
+                    "limit": exc.limit,
+                    "actual": exc.actual,
+                    "task_id": exc.task_id,
+                }.items()
+                if value is not None
+            }
+            return error(
+                422,
+                "policy_violation",
+                message=_safe_validation_message(exc),
+                details=details,
+            )
         except StoreError:
             return error(503, "store_unavailable")
         except Exception:
@@ -84,10 +121,8 @@ class ImportApi:
         return ApiResponse(
             200,
             {
-                "status": "changed" if result.changed else "unchanged",
+                "outcome": "changed" if result.changed else "unchanged",
                 "mode": selected.value,
-                "changed": result.changed,
-                "unchanged": result.unchanged,
                 "id_mapping": {
                     str(old): new
                     for item in result.items

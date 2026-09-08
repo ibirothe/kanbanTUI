@@ -64,11 +64,23 @@ def test_controller_merge_replace_noop_and_undo():
     app = BoardApplication(store)
     api = ImportApi(app, BoardPolicy(), token=TOKEN)
     body = payload()
-    assert api.import_payload("replace", body).body["status"] == "changed"
-    assert api.import_payload("replace", body).body["status"] == "unchanged"
+    assert api.import_payload("replace", body).body == {
+        "outcome": "changed",
+        "mode": "replace",
+        "id_mapping": {},
+    }
+    assert api.import_payload("replace", body).body == {
+        "outcome": "unchanged",
+        "mode": "replace",
+        "id_mapping": {},
+    }
     assert store.commits == 1
     result = api.import_payload("merge", body)
-    assert result.body["id_mapping"] == {"1": 2}
+    assert result.body == {
+        "outcome": "changed",
+        "mode": "merge",
+        "id_mapping": {"1": 2},
+    }
     assert store.commits == 2
     assert len(app.undo().active) == 1
     assert (
@@ -87,7 +99,6 @@ def test_controller_merge_replace_noop_and_undo():
         (b"\xff", "merge", 400, "invalid_json"),
         (b'{"version":1,"version":2}', "merge", 400, "invalid_json"),
         (b'{"value":NaN}', "merge", 400, "invalid_json"),
-        (b"{}", "merge", 400, "invalid_import_format"),
         (b"{}", "unknown", 400, "invalid_mode"),
         (b" " * (MAX_BODY_BYTES + 1), "merge", 413, "payload_too_large"),
     ],
@@ -100,15 +111,78 @@ def test_controller_rejects_invalid_input_without_transaction(body, mode, status
     assert store.transactions == 0
 
 
+def test_controller_returns_actionable_bounded_import_format_error():
+    store = MemoryBoardStore()
+    api = ImportApi(BoardApplication(store), BoardPolicy(), token=TOKEN)
+
+    response = api.import_payload("merge", b"{}")
+    assert response.status == 400
+    assert response.body == {
+        "error": {
+            "code": "invalid_import_format",
+            "message": "unsupported export format: None",
+        }
+    }
+
+    oversized_value = "x" * 1000
+    response = api.import_payload(
+        "merge",
+        json.dumps(
+            {
+                "format": oversized_value,
+                "version": 1,
+                "active": [],
+                "archived": [],
+            }
+        ).encode(),
+    )
+    assert response.status == 400
+    assert len(response.body["error"]["message"]) == 400
+    assert store.transactions == 0
+
+
 def test_policy_and_commit_failure_preserve_state_and_release_lock():
     store = MemoryBoardStore()
     app = BoardApplication(FailOnceCommitStore(store))
     api = ImportApi(app, BoardPolicy(task_text_limit=4), token=TOKEN)
-    assert api.import_payload("merge", payload()).status == 422
-    assert api.import_payload("merge", payload("one")).status == 503
+    response = api.import_payload("merge", payload())
+    assert response.status == 422
+    assert response.body == {
+        "error": {
+            "code": "policy_violation",
+            "message": "Imported task #1 text exceeds limit (8/4 characters).",
+            "rule": "task_text_limit",
+            "limit": 4,
+            "actual": 8,
+            "task_id": 1,
+        }
+    }
+    store_error = api.import_payload("merge", payload("one"))
+    assert store_error.status == 503
+    assert store_error.body == {"error": {"code": "store_unavailable"}}
     assert not store.board.active and not store.locked and store.previous is None
     assert api.import_payload("merge", payload("one")).status == 200
     assert not app.undo().active
+
+
+def test_policy_capacity_error_exposes_stable_rule_and_counts():
+    store = MemoryBoardStore()
+    api = ImportApi(BoardApplication(store), BoardPolicy(todo_limit=0), token=TOKEN)
+
+    response = api.import_payload("replace", payload("one"))
+
+    assert response.status == 422
+    assert response.body == {
+        "error": {
+            "code": "policy_violation",
+            "message": "Imported board exceeds TODO limit (1/0).",
+            "rule": "todo_limit",
+            "limit": 0,
+            "actual": 1,
+        }
+    }
+    assert store.transactions == 0
+    assert not store.board.active
 
 
 def test_unexpected_error_is_sanitized():

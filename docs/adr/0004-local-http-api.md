@@ -21,6 +21,9 @@ from a normal CLI invocation because its resolved configuration remains in memor
 `BoardPolicy` and one token. It accepts only the versioned transfer payload and
 calls the shared import use case. It binds to numeric IPv4 loopback, requires
 Bearer authentication, limits request bodies and returns stable sanitized JSON.
+Successful imports expose one aggregate `outcome` rather than leaking internal
+application-result counters. Expected transfer-format and policy failures include
+bounded actionable details; storage and unexpected failures remain opaque.
 
 The `kanban-tui serve-api` command is the composition root. Its name preserves
 `a` as the existing unique prefix for `add`. It resolves the existing `--board`

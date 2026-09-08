@@ -8,6 +8,21 @@ from .models import Board, TaskState
 class PolicyViolation(ValueError):
     """A board violates a configured business policy."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        rule: str | None = None,
+        limit: int | None = None,
+        actual: int | None = None,
+        task_id: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.rule = rule
+        self.limit = limit
+        self.actual = actual
+        self.task_id = task_id
+
 
 @dataclass(frozen=True)
 class BoardPolicy:
@@ -41,12 +56,16 @@ def validate_imported_board(policy: BoardPolicy, board: Board) -> None:
             raise PolicyViolation(
                 "Imported task "
                 f"#{task.id} text exceeds limit "
-                f"({len(task.text)}/{policy.task_text_limit} characters)."
+                f"({len(task.text)}/{policy.task_text_limit} characters).",
+                rule="task_text_limit",
+                limit=policy.task_text_limit,
+                actual=len(task.text),
+                task_id=task.id,
             )
 
-    for state, label in (
-        (TaskState.TODO, "TODO"),
-        (TaskState.IN_PROGRESS, "WIP"),
+    for state, label, rule in (
+        (TaskState.TODO, "TODO", "todo_limit"),
+        (TaskState.IN_PROGRESS, "WIP", "wip_limit"),
     ):
         limit = policy.state_limit(state)
         if limit is None:
@@ -54,5 +73,8 @@ def validate_imported_board(policy: BoardPolicy, board: Board) -> None:
         count = count_state(board, state)
         if count > limit:
             raise PolicyViolation(
-                f"Imported board exceeds {label} limit ({count}/{limit})."
+                f"Imported board exceeds {label} limit ({count}/{limit}).",
+                rule=rule,
+                limit=limit,
+                actual=count,
             )
