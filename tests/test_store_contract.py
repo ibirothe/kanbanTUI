@@ -6,6 +6,7 @@ from kanban_tui.application import (
     TaskConflict,
     TaskExpectation,
 )
+from kanban_tui.idempotency import digest_idempotency_key, digest_import_request
 from kanban_tui.imports import ImportMode
 from kanban_tui.policy import BoardPolicy
 from kanban_tui.results import OperationCode
@@ -131,6 +132,46 @@ def test_import_use_case_runs_with_memory_store_without_file_adapter():
     )
     assert [item.code for item in result.items] == [OperationCode.IMPORT_COMPLETED]
     assert [task.text for task in replaced.active.values()] == ["imported"]
+
+
+def test_keyed_noop_preserves_undo_and_receipt_across_store_contract(
+    application_store,
+):
+    application, store = application_store
+    board, _ = application.mutate(
+        lambda current: add_tasks(_policy(), current, ["one"])
+    )
+
+    _, first = application.import_board_once(
+        _policy(),
+        board,
+        ImportMode.REPLACE,
+        key_digest=digest_idempotency_key("request-1"),
+        request_digest=digest_import_request("replace", b"payload"),
+    )
+    _, replay = application.import_board_once(
+        _policy(),
+        board,
+        ImportMode.REPLACE,
+        key_digest=digest_idempotency_key("request-1"),
+        request_digest=digest_import_request("replace", b"payload"),
+    )
+
+    assert first.unchanged == 1
+    assert replay.unchanged == 1
+    assert store.commits == 2
+    assert not application.undo().active
+
+    board_after_undo, after_undo_replay = application.import_board_once(
+        _policy(),
+        board,
+        ImportMode.REPLACE,
+        key_digest=digest_idempotency_key("request-1"),
+        request_digest=digest_import_request("replace", b"payload"),
+    )
+    assert after_undo_replay.unchanged == 1
+    assert not board_after_undo.active
+    assert store.commits == 2
 
 
 def _policy():

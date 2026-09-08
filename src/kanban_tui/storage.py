@@ -11,6 +11,7 @@ import yaml
 from .application import BoardTransaction, StoreError
 from .atomic import atomic_text_writer
 from .codec import DatastoreDocument, dump_datastore, load_datastore
+from .idempotency import MAX_IMPORT_RECEIPTS, ImportReceipt
 from .models import Board
 from .resources import resolve_board_paths
 from .settings import AppConfig
@@ -128,11 +129,14 @@ def _read_document(data_path: Path) -> DatastoreDocument:
 
 
 def _atomic_write_document(
-    data_path: Path, board: Board, previous: Board | None = None
+    data_path: Path,
+    board: Board,
+    previous: Board | None = None,
+    import_receipts: tuple[ImportReceipt, ...] = (),
 ) -> None:
     try:
         with atomic_text_writer(data_path) as outfile:
-            dump_datastore(outfile, board, previous)
+            dump_datastore(outfile, board, previous, import_receipts)
     except (OSError, yaml.YAMLError) as exc:
         raise click.ClickException(
             f"Could not write datastore {data_path}: {exc}"
@@ -156,9 +160,18 @@ def write_data(
     snapshot_previous: bool = False,
     previous: Board | None = None,
 ) -> None:
+    try:
+        document = _read_document(config.data_path)
+    except FileNotFoundError:
+        document = DatastoreDocument(Board())
     if previous is None and snapshot_previous:
-        previous = read_data(config, initialize_missing=False)
-    _atomic_write_document(config.data_path, board, previous)
+        previous = document.board
+    _atomic_write_document(
+        config.data_path,
+        board,
+        previous,
+        document.import_receipts,
+    )
 
 
 def undo_last_change(config: AppConfig) -> Board:
@@ -172,7 +185,11 @@ def undo_last_change(config: AppConfig) -> Board:
         raise click.ClickException("Nothing to undo.")
 
     previous = document.previous
-    _atomic_write_document(data_path, previous)
+    _atomic_write_document(
+        data_path,
+        previous,
+        import_receipts=document.import_receipts,
+    )
     return previous
 
 
@@ -181,15 +198,62 @@ class YamlBoardTransaction:
 
     def __init__(self, config: AppConfig) -> None:
         self.config = config
+        self._document: DatastoreDocument | None = None
+
+    def _load_document(self) -> DatastoreDocument:
+        if self._document is None:
+            try:
+                self._document = _read_document(self.config.data_path)
+            except FileNotFoundError:
+                self._document = DatastoreDocument(Board())
+        return self._document
 
     def load(self) -> Board:
-        return read_data(self.config, initialize_missing=False)
+        return self._load_document().board
 
     def commit(self, board: Board, *, previous: Board) -> None:
-        write_data(self.config, board, previous=previous)
+        document = self._load_document()
+        _atomic_write_document(
+            self.config.data_path,
+            board,
+            previous,
+            document.import_receipts,
+        )
 
     def undo(self) -> Board:
-        return undo_last_change(self.config)
+        document = self._load_document()
+        if document.previous is None:
+            raise click.ClickException("Nothing to undo.")
+        previous = document.previous
+        _atomic_write_document(
+            self.config.data_path,
+            previous,
+            import_receipts=document.import_receipts,
+        )
+        return previous
+
+    def find_import_receipt(self, key_digest: str) -> ImportReceipt | None:
+        return next(
+            (
+                receipt
+                for receipt in reversed(self._load_document().import_receipts)
+                if receipt.key_digest == key_digest
+            ),
+            None,
+        )
+
+    def commit_import(
+        self, board: Board, *, previous: Board, receipt: ImportReceipt
+    ) -> None:
+        document = self._load_document()
+        retained = tuple(
+            existing
+            for existing in document.import_receipts
+            if existing.key_digest != receipt.key_digest
+        )
+        receipts = (*retained, receipt)[-MAX_IMPORT_RECEIPTS:]
+        undo = previous if receipt.changed else document.previous
+        _atomic_write_document(self.config.data_path, board, undo, receipts)
 
 
 class YamlBoardStore:

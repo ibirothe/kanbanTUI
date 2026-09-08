@@ -6,7 +6,7 @@ import pytest
 from textual.widgets import Input
 
 from kanban_tui.cli import main
-from kanban_tui.codec import decode_board, encode_board
+from kanban_tui.codec import DATASTORE_SCHEMA_VERSION, decode_board, encode_board
 from kanban_tui.models import (
     Board,
     Task,
@@ -60,7 +60,10 @@ def test_legacy_five_field_record_remains_metadata_free():
 
     assert board.active[1].priority is None
     assert board.active[1].tags == ()
-    assert encode_board(board) == {"schema_version": 1, **raw}
+    assert encode_board(board) == {
+        "schema_version": DATASTORE_SCHEMA_VERSION,
+        **raw,
+    }
 
 
 def test_metadata_round_trip_uses_optional_sixth_record_field():

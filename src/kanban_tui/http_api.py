@@ -9,12 +9,14 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlsplit
 
-from .application import BoardApplication, StoreError
+from .application import BoardApplication, IdempotencyConflict, StoreError
+from .idempotency import digest_idempotency_key, digest_import_request
 from .imports import ImportMode
 from .policy import BoardPolicy, PolicyViolation
 from .transfer_format import TransferFormatError, board_from_export
 
 MAX_BODY_BYTES = 1024 * 1024
+MAX_IDEMPOTENCY_KEY_LENGTH = 128
 
 
 @dataclass(frozen=True)
@@ -76,13 +78,25 @@ class ImportApi:
     def authorized(self, authorization: str) -> bool:
         return hmac.compare_digest(authorization.encode("utf-8"), self._authorization)
 
-    def import_payload(self, mode: str, body: bytes) -> ApiResponse:
+    def import_payload(
+        self,
+        mode: str,
+        body: bytes,
+        *,
+        idempotency_key: str | None = None,
+    ) -> ApiResponse:
         if len(body) > MAX_BODY_BYTES:
             return error(413, "payload_too_large")
         try:
             selected = ImportMode(mode)
         except ValueError:
             return error(400, "invalid_mode")
+        if idempotency_key is not None and (
+            not idempotency_key
+            or len(idempotency_key) > MAX_IDEMPOTENCY_KEY_LENGTH
+            or any(ord(char) < 33 or ord(char) > 126 for char in idempotency_key)
+        ):
+            return error(400, "invalid_idempotency_key")
         try:
             payload = json.loads(
                 body.decode("utf-8"),
@@ -100,7 +114,20 @@ class ImportApi:
                 message=_safe_validation_message(exc),
             )
         try:
-            _, result = self.application.import_board(self.policy, imported, selected)
+            if idempotency_key is None:
+                _, result = self.application.import_board(
+                    self.policy, imported, selected
+                )
+            else:
+                _, result = self.application.import_board_once(
+                    self.policy,
+                    imported,
+                    selected,
+                    key_digest=digest_idempotency_key(idempotency_key),
+                    request_digest=digest_import_request(selected.value, body),
+                )
+        except IdempotencyConflict:
+            return error(409, "idempotency_conflict")
         except PolicyViolation as exc:
             details = {
                 key: value
@@ -238,6 +265,10 @@ def create_server(
             if query["mode"][0] not in {"merge", "replace"}:
                 self.respond(error(400, "invalid_mode"))
                 return
+            idempotency_keys = self.headers.get_all("Idempotency-Key", [])
+            if len(idempotency_keys) > 1:
+                self.respond(error(400, "invalid_idempotency_key"))
+                return
             types = self.headers.get_all("Content-Type", [])
             if len(types) != 1 or self.headers.get_content_type() != "application/json":
                 self.respond(error(415, "unsupported_media_type"))
@@ -266,7 +297,11 @@ def create_server(
                 self.respond(error(400, "incomplete_body"))
                 return
             try:
-                response = api.import_payload(query["mode"][0], body)
+                response = api.import_payload(
+                    query["mode"][0],
+                    body,
+                    idempotency_key=(idempotency_keys[0] if idempotency_keys else None),
+                )
             except Exception as exc:
                 response = error(
                     500,

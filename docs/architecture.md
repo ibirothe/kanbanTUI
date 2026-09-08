@@ -185,7 +185,9 @@ The datastore envelope uses integer `schema_version: 1`, plus `data`, `deleted` 
 
 `codec.py` owns this representation; the `Task` and `Board` domain models contain only domain state and invariants. The YAML loader rejects duplicate keys at every mapping level before dictionaries are constructed. Current envelopes, task metadata and records use explicit field allowlists. Unknown versions or fields are rejected rather than silently discarded.
 
-Unversioned legacy envelopes and their known four-, five- and six-field records remain readable. Legacy timestamps are accepted and normalized to timezone-aware `datetime` values. Numeric positions and IDs are validated strictly; fractional values are not coerced. Reading legacy data has no write side effect; the next successful mutation writes schema version 1 while preserving all known fields.
+Unversioned legacy envelopes, schema version 1 and their known four-, five- and six-field records remain readable. Legacy timestamps are accepted and normalized to timezone-aware `datetime` values. Numeric positions and IDs are validated strictly; fractional values are not coerced. Reading legacy data has no write side effect; the next successful mutation writes schema version 2 while preserving all known fields.
+
+Schema version 2 may include a bounded `_import_receipts` list used by replay-safe HTTP imports. `IdempotentBoardTransaction` extends the base persistence port as an optional capability, so ordinary stores and mutations remain independent of HTTP retry behavior. The YAML adapter writes a changed board, undo snapshot and receipt in one atomic replacement under the existing writer lock. Ordinary mutations and undo preserve receipts. Clear-text client keys are never part of the datastore.
 
 ## Undo
 
@@ -204,6 +206,8 @@ The JSON file adapter in `transfer.py` delegates payload conversion to that code
 `replace` preserves imported IDs. `merge` preserves non-conflicting IDs and deterministically remaps collisions against active or archived history. Export refuses destinations that resolve to the selected board's config file, datastore or datastore lock file.
 
 The local HTTP adapter and its wire contract are documented in [Local HTTP API](local-api.md) and [ADR 0004](adr/0004-local-http-api.md). `kanban-tui serve-api` resolves the selected configuration and application once, then owns the foreground server lifecycle. The command name preserves `a` as the unique prefix for `add`. The token comes only from `KANBAN_TUI_API_TOKEN`; the listener remains fixed to numeric IPv4 loopback.
+
+Optional idempotency keys and durable bounded receipts are specified in [ADR 0005](adr/0005-idempotent-http-imports.md). Requests without a key retain additive merge behavior. Keyed requests replay their original application result or reject reuse with a byte-different payload or mode.
 
 ## TUI safety
 
