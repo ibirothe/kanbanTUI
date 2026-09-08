@@ -57,7 +57,8 @@ def test_api_command_wires_selected_config_once_and_stops_cleanly(
     assert store.config is config or store.config.data_path == config.data_path
     assert server.entered and server.served and server.closed
     assert result.output == (
-        "Serving local API on http://127.0.0.1:43210\nLocal API stopped.\n"
+        "Serving local API for 'default' on http://127.0.0.1:43210\n"
+        "Local API stopped.\n"
     )
     assert secret not in result.output
 
@@ -78,6 +79,7 @@ def test_api_command_uses_named_board_selection(runner, isolated_app_home, monke
     store = captured["api"].application.store
     assert isinstance(store, YamlBoardStore)
     assert store.config.data_path == get_board_data_path("work")
+    assert "Serving local API for 'work'" in result.output
 
 
 def test_api_command_requires_environment_token_before_configuration(
@@ -120,8 +122,12 @@ def test_api_command_closes_server_and_translates_runtime_failure(
 
 def test_api_command_exposes_no_host_or_token_option(runner):
     result = runner.invoke(main, ["serve-api", "--help"])
+    help_text = " ".join(result.output.split())
 
     assert result.exit_code == 0
-    assert "--port" in result.output
-    assert "--host" not in result.output
-    assert "--token" not in result.output
+    assert "--port" in help_text
+    assert "KANBAN_TUI_API_TOKEN" in help_text
+    assert "IPv4 loopback" in help_text
+    assert "never binds to an external interface" in help_text
+    assert "--host" not in help_text
+    assert "--token" not in help_text

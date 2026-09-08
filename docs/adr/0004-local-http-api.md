@@ -32,6 +32,12 @@ or `--config` selection once, reads the token only from
 runtime, and serves in the foreground until interrupted. Port 8765 is the default;
 port 0 is allowed for tests. There is no host option.
 
+The startup output identifies the selected board. Server-side failures receive a
+generated request ID that is returned to the client and written through an
+injectable log sink. Logs contain only that ID, the status and the exception type;
+they exclude request targets, credentials, payloads, exception messages and local
+paths. Expected client failures remain silent.
+
 The standard-library HTTP server is sufficient for the small serial local surface,
 so the distribution gains no web-framework dependency. Configuration changes take
 effect after restarting the process. The token is not accepted as a CLI argument

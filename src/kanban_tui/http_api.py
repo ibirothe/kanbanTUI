@@ -2,7 +2,9 @@
 
 import hmac
 import json
-from collections.abc import Mapping
+import secrets
+import sys
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlsplit
@@ -19,6 +21,7 @@ MAX_BODY_BYTES = 1024 * 1024
 class ApiResponse:
     status: int
     body: dict[str, object]
+    diagnostic: str | None = None
 
 
 def error(
@@ -27,13 +30,14 @@ def error(
     *,
     message: str | None = None,
     details: Mapping[str, object] | None = None,
+    diagnostic: str | None = None,
 ) -> ApiResponse:
     error_body: dict[str, object] = {"code": code}
     if message is not None:
         error_body["message"] = message
     if details is not None:
         error_body.update(details)
-    return ApiResponse(status, {"error": error_body})
+    return ApiResponse(status, {"error": error_body}, diagnostic)
 
 
 def _safe_validation_message(error: ValueError, *, limit: int = 400) -> str:
@@ -114,10 +118,14 @@ class ImportApi:
                 message=_safe_validation_message(exc),
                 details=details,
             )
-        except StoreError:
-            return error(503, "store_unavailable")
-        except Exception:
-            return error(500, "internal_error")
+        except StoreError as exc:
+            return error(
+                503,
+                "store_unavailable",
+                diagnostic=type(exc).__name__,
+            )
+        except Exception as exc:
+            return error(500, "internal_error", diagnostic=type(exc).__name__)
         return ApiResponse(
             200,
             {
@@ -132,10 +140,21 @@ class ImportApi:
         )
 
 
-def create_server(api: ImportApi, *, port: int = 0) -> HTTPServer:
+def _stderr_log(message: str) -> None:
+    print(message, file=sys.stderr)
+
+
+def create_server(
+    api: ImportApi,
+    *,
+    port: int = 0,
+    logger: Callable[[str], None] | None = None,
+) -> HTTPServer:
     """Bind exclusively to numeric IPv4 loopback; caller owns serve/close lifecycle."""
     if isinstance(port, bool) or not isinstance(port, int) or not 0 <= port <= 65535:
         raise ValueError("API port must be an integer between 0 and 65535")
+
+    log = _stderr_log if logger is None else logger
 
     class Handler(BaseHTTPRequestHandler):
         # One request per connection avoids ambiguous body framing and pipelining.
@@ -155,6 +174,24 @@ def create_server(api: ImportApi, *, port: int = 0) -> HTTPServer:
             self.respond(error(code, "invalid_request"))
 
         def respond(self, response: ApiResponse) -> None:
+            if response.status >= 500:
+                request_id = secrets.token_hex(8)
+                raw_error = response.body.get("error")
+                error_body = dict(raw_error) if isinstance(raw_error, dict) else {}
+                error_body["request_id"] = request_id
+                response = ApiResponse(
+                    response.status,
+                    {"error": error_body},
+                    response.diagnostic,
+                )
+                diagnostic = response.diagnostic or str(
+                    error_body.get("code", "server_error")
+                )
+                log(
+                    "local-api "
+                    f"request_id={request_id} status={response.status} "
+                    f"error={diagnostic}"
+                )
             data = json.dumps(response.body, separators=(",", ":")).encode("utf-8")
             self.send_response(response.status)
             self.send_header("Content-Type", "application/json")
@@ -230,8 +267,12 @@ def create_server(api: ImportApi, *, port: int = 0) -> HTTPServer:
                 return
             try:
                 response = api.import_payload(query["mode"][0], body)
-            except Exception:
-                response = error(500, "internal_error")
+            except Exception as exc:
+                response = error(
+                    500,
+                    "internal_error",
+                    diagnostic=type(exc).__name__,
+                )
             self.respond(response)
 
     return HTTPServer(("127.0.0.1", port), Handler)
