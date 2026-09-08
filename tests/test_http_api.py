@@ -206,4 +206,13 @@ def test_http_yaml_lock_and_concurrent_imports(write_config):
             responses = list(executor.map(lambda _: request(port, body), range(2)))
         assert all(response[0] == 200 for response in responses)
         assert len(app.read().active) == 2
-        assert len(app.undo().active) == 1
+        assert (
+            request(
+                port,
+                payload("replacement"),
+                path="/v1/board/import?mode=replace",
+            )[0]
+            == 200
+        )
+        assert [task.text for task in app.read().active.values()] == ["replacement"]
+        assert len(app.undo().active) == 2

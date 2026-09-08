@@ -4,7 +4,7 @@
 
 ### Fixes and quality
 
-- add an authenticated loopback HTTP import adapter with bounded JSON requests, stable responses and shared application transactions; CLI server startup follows separately;
+- add an authenticated loopback HTTP import adapter with bounded JSON requests, stable responses and shared application transactions;
 - isolate the versioned board transfer payload codec and its errors from Click and filesystem adapters so additional transports can reuse the same validation;
 - route shared read, mutation, import and undo use cases through application-owned store/transaction protocols; provide a YAML adapter and an in-memory contract test double;
 - return typed per-task operation codes, parameters and `changed`/`unchanged`/`rejected` states from services; format output and choose CLI streams/exit codes only in adapters;
@@ -25,6 +25,7 @@
 
 ### Quality of life
 
+- expose the selected board's local import API as a foreground `kanban-tui serve-api` command with environment-based authentication and clean Ctrl+C shutdown;
 - add priority and repeatable tags during task creation as a single undoable mutation;
 - add Ctrl+R refresh, a searchable archive restore picker and visible board identity to the TUI.
 

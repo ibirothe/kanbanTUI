@@ -79,6 +79,7 @@ pipx uninstall kanbantui
 - [Configuration and named boards](docs/configuration.md): paths, migration, settings and board selection.
 - [Color themes](docs/themes.md): built-in palettes and custom YAML themes.
 - [Shell completion](docs/shell-completion.md): Bash, Zsh and Fish setup.
+- [Local HTTP API](docs/local-api.md): authenticated local merge/replace imports.
 
 ## Interactive TUI
 

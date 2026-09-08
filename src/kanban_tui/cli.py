@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import click
@@ -14,6 +15,7 @@ from .config import (
     set_config_value,
     validate_board_name,
 )
+from .http_api import ImportApi, create_server
 from .imports import ImportMode
 from .models import TaskPriority, TaskState, normalize_tag
 from .operation_messages import format_operation
@@ -624,6 +626,44 @@ def tui_command():
     if isinstance(explicit, Path):
         identity = f"config: {explicit.name}"
     run_tui(config, application=application, board_name=identity)
+
+
+@main.command(name="serve-api")
+@click.option(
+    "--port",
+    type=click.IntRange(0, 65535),
+    default=8765,
+    show_default=True,
+    help="Local TCP port; use 0 to let the OS select one.",
+)
+def api_command(port):
+    """Serve the selected board's import API on IPv4 loopback."""
+    token = os.environ.get("KANBAN_TUI_API_TOKEN")
+    if token is None:
+        raise click.ClickException(
+            "Set KANBAN_TUI_API_TOKEN before starting the local API."
+        )
+
+    config, application = _runtime()
+    try:
+        api = ImportApi(application, config.policy, token=token)
+        server = create_server(api, port=port)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    except OSError as exc:
+        raise click.ClickException(f"Could not bind local API: {exc}") from exc
+
+    try:
+        with server:
+            bound_port = server.server_address[1]
+            click.echo(f"Serving local API on http://127.0.0.1:{bound_port}")
+            try:
+                server.serve_forever()
+            except KeyboardInterrupt:
+                pass
+    except OSError as exc:
+        raise click.ClickException(f"Local API failed: {exc}") from exc
+    click.echo("Local API stopped.")
 
 
 @main.command()
