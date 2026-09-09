@@ -5,8 +5,8 @@ from kanban_tui.application import BoardApplication
 from kanban_tui.models import Board
 from kanban_tui.services import add_tasks
 from kanban_tui.storage import YamlBoardStore, datastore_lock, read_data, write_data
-from kanban_tui.transactions import undo_board
 from kanban_tui.tui import KanbanApp, MutationPromptScreen
+from tests.application_test_support import yaml_application
 from tests.store_test_double import FailOnceCommitStore
 
 
@@ -125,7 +125,9 @@ async def test_lock_error_keeps_add_draft_for_retry(write_config):
         "keep",
         "retry",
     ]
-    assert [task.text for task in undo_board(config).active.values()] == ["keep"]
+    assert [task.text for task in yaml_application(config).undo().active.values()] == [
+        "keep"
+    ]
 
 
 async def test_write_error_keeps_edit_draft_and_writes_once_on_retry(
@@ -160,4 +162,4 @@ async def test_write_error_keeps_edit_draft_and_writes_once_on_retry(
 
     assert store.attempts == 2
     assert read_data(config).active[1].text == "after"
-    assert undo_board(config).active[1].text == "before"
+    assert yaml_application(config).undo().active[1].text == "before"

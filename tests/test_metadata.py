@@ -27,7 +27,7 @@ from kanban_tui.services import (
 )
 from kanban_tui.settings import AppConfig, Limits
 from kanban_tui.storage import datastore_lock, read_data, write_data
-from kanban_tui.transfer import board_from_export, export_payload
+from kanban_tui.transfer_format import board_from_export, export_payload
 from kanban_tui.tui import KanbanApp
 
 STAMP = datetime(2026, 9, 4, 10, 0, tzinfo=timezone.utc)
@@ -164,13 +164,13 @@ def test_cli_priority_tags_filters_and_undo(runner, write_config):
     assert "#backend" in tag_result.output
     assert [item["id"] for item in json.loads(filtered.output)["tasks"]] == [1]
 
-    persisted = read_data(config_value, initialize_missing=False)
+    persisted = read_data(config_value)
     assert persisted.active[1].priority is TaskPriority.URGENT
     assert persisted.active[1].tags == ("backend",)
 
     undo = runner.invoke(main, ["undo"])
     assert undo.exit_code == 0
-    restored = read_data(config_value, initialize_missing=False)
+    restored = read_data(config_value)
     assert restored.active[1].priority is TaskPriority.URGENT
     assert restored.active[1].tags == ()
 
@@ -200,6 +200,6 @@ async def test_tui_cycles_priority_and_sets_tags(write_config):
         await app._search_prompt_result("backend")
         assert app._selected_task().id == 1
 
-    persisted = read_data(config_value, initialize_missing=False)
+    persisted = read_data(config_value)
     assert persisted.active[1].priority is TaskPriority.LOW
     assert persisted.active[1].tags == ("backend", "ui")

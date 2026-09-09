@@ -22,7 +22,7 @@ Production code lives under `src/kanban_tui/`:
 - `operation_messages.py` — English terminal presentation for operation results.
 - `settings.py` — compatible `AppConfig` composition of infrastructure, policy and presentation settings.
 - `atomic.py` — shared same-directory temporary-file lifecycle and cleanup.
-- `transactions.py` — temporary config-based compatibility wrappers around `BoardApplication`.
+- `transactions.py` — deprecated config-based compatibility wrappers scheduled for removal in `1.0.0`.
 - `storage.py` — YAML implementation of the application ports plus side-effect-free reads, cross-process writer locking, atomic writes and undo.
 - `codec.py` — strict YAML parsing, datastore schema versioning and legacy record migration.
 - `themes.py` — semantic built-in palettes plus XDG/portable custom-theme discovery and YAML validation.
@@ -59,7 +59,7 @@ Each `OperationItem` carries a stable `OperationCode`, status, optional task ID 
 
 `TaskConflict` is a separate typed application exception carrying `TASK_CONFLICT` and the affected task ID. Infrastructure failures cross the persistence port as `StoreError` and are translated by terminal adapters. Adapters therefore never infer domain rejection, conflict or infrastructure failure from text or an `Error:` prefix. The result decision is recorded in [ADR 0002](adr/0002-typed-operation-results.md).
 
-The persistence contract and dependency direction are recorded in [ADR 0003](adr/0003-persistence-ports.md). `BoardStore` and `BoardTransaction` are deliberately small `typing.Protocol` ports owned by the application. `YamlBoardStore` implements them; the contract suite uses an in-memory implementation to verify substitution without filesystem access or monkeypatching concrete storage globals. The compatibility functions in `transactions.py` may be removed after downstream callers migrate to explicit `BoardApplication` injection.
+The persistence contract and dependency direction are recorded in [ADR 0003](adr/0003-persistence-ports.md). `BoardStore` and `BoardTransaction` are deliberately small `typing.Protocol` ports owned by the application. `YamlBoardStore` implements them; the contract suite uses an in-memory implementation to verify substitution without filesystem access or monkeypatching concrete storage globals. Product code and regular tests use explicit `BoardApplication` injection. The compatibility functions in `transactions.py` emit `DeprecationWarning` and are scheduled for coordinated removal in `1.0.0`.
 
 Read-only operations (`show`, `history`, export and normal TUI reads) do not acquire the exclusive writer lock.
 

@@ -3,18 +3,13 @@ from pathlib import Path
 
 import click
 
+from . import transfer_format as _transfer_format
 from .atomic import atomic_text_writer
-from .imports import merge_boards as merge_boards
+from .deprecations import warn_legacy_api
+from .imports import merge_boards as _merge_boards
 from .models import Board
-from .transfer_format import (
-    EXPORT_FORMAT,
-    EXPORT_VERSION,
-    TransferFormatError,
-    board_from_export,
-    export_payload,
-)
 
-__all__ = [
+__all__ = [  # noqa: F822 - deprecated names are resolved by __getattr__
     "EXPORT_FORMAT",
     "EXPORT_VERSION",
     "TransferFormatError",
@@ -42,8 +37,8 @@ def read_export(path: Path) -> Board:
         raise click.ClickException(f"Could not read import file {path}: {exc}") from exc
 
     try:
-        return board_from_export(payload)
-    except TransferFormatError as exc:
+        return _transfer_format.board_from_export(payload)
+    except _transfer_format.TransferFormatError as exc:
         raise click.ClickException(f"Import file {path}: {exc}") from exc
 
 
@@ -56,7 +51,12 @@ def write_export(path: Path, board: Board, *, overwrite: bool = False) -> Path:
 
     try:
         with atomic_text_writer(path) as outfile:
-            json.dump(export_payload(board), outfile, ensure_ascii=False, indent=2)
+            json.dump(
+                _transfer_format.export_payload(board),
+                outfile,
+                ensure_ascii=False,
+                indent=2,
+            )
             outfile.write("\n")
     except (OSError, ValueError) as exc:
         raise click.ClickException(
@@ -64,3 +64,34 @@ def write_export(path: Path, board: Board, *, overwrite: bool = False) -> Path:
         ) from exc
 
     return path
+
+
+def __getattr__(name: str) -> object:
+    compatibility_exports: dict[str, tuple[object, str]] = {
+        "EXPORT_FORMAT": (
+            _transfer_format.EXPORT_FORMAT,
+            "kanban_tui.transfer_format.EXPORT_FORMAT",
+        ),
+        "EXPORT_VERSION": (
+            _transfer_format.EXPORT_VERSION,
+            "kanban_tui.transfer_format.EXPORT_VERSION",
+        ),
+        "TransferFormatError": (
+            _transfer_format.TransferFormatError,
+            "kanban_tui.transfer_format.TransferFormatError",
+        ),
+        "board_from_export": (
+            _transfer_format.board_from_export,
+            "kanban_tui.transfer_format.board_from_export()",
+        ),
+        "export_payload": (
+            _transfer_format.export_payload,
+            "kanban_tui.transfer_format.export_payload()",
+        ),
+        "merge_boards": (_merge_boards, "kanban_tui.imports.merge_boards()"),
+    }
+    if name in compatibility_exports:
+        value, replacement = compatibility_exports[name]
+        warn_legacy_api(f"kanban_tui.transfer.{name}", replacement, stacklevel=2)
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

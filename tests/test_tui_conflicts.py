@@ -15,8 +15,8 @@ from kanban_tui.services import (
     set_task_tags,
 )
 from kanban_tui.storage import read_data
-from kanban_tui.transactions import mutate_board, undo_board
 from kanban_tui.tui import ArchiveScreen, KanbanApp, PromptScreen
+from tests.application_test_support import yaml_application
 
 
 def changed_result() -> OperationResult:
@@ -34,7 +34,7 @@ async def test_conflicting_prompt_preserves_draft_and_requires_review(
         "kanban_tui.services.timestamp",
         lambda: datetime(2026, 9, 6, 12, 0, tzinfo=timezone.utc),
     )
-    mutate_board(config, lambda b: add_tasks(config.policy, b, ["original"]))
+    yaml_application(config).mutate(lambda b: add_tasks(config.policy, b, ["original"]))
     app = KanbanApp(config)
     async with app.run_test(size=(60, 24)) as pilot:
         await pilot.press(key)
@@ -46,7 +46,7 @@ async def test_conflicting_prompt_preserves_draft_and_requires_review(
                 return edit_task(config.policy, board, "1", "external")
             return set_task_tags(board, "1", ["external"])
 
-        mutate_board(config, external)
+        yaml_application(config).mutate(external)
         original = config.data_path.read_bytes()
         await pilot.press("enter")
         await pilot.pause()
@@ -67,7 +67,7 @@ async def test_conflicting_prompt_preserves_draft_and_requires_review(
     assert (task.text if key == "e" else task.tags) == (
         "draft" if key == "e" else ("draft",)
     )
-    previous = undo_board(config).active[1]
+    previous = yaml_application(config).undo().active[1]
     assert (previous.text if key == "e" else previous.tags) == (
         "external" if key == "e" else ("external",)
     )
@@ -76,7 +76,7 @@ async def test_conflicting_prompt_preserves_draft_and_requires_review(
 @pytest.mark.parametrize("external_action", ["archive", "replace", "remove"])
 async def test_prompt_rejects_changed_task_identity(write_config, external_action):
     config = write_config()
-    mutate_board(config, lambda b: add_tasks(config.policy, b, ["original"]))
+    yaml_application(config).mutate(lambda b: add_tasks(config.policy, b, ["original"]))
     app = KanbanApp(config)
     async with app.run_test() as pilot:
         await pilot.press("e")
@@ -92,7 +92,7 @@ async def test_prompt_rejects_changed_task_identity(write_config, external_actio
                 return add_tasks(config.policy, board, ["replacement"])
             return changed_result()
 
-        mutate_board(config, external)
+        yaml_application(config).mutate(external)
         original = config.data_path.read_bytes()
         await pilot.press("enter")
         await pilot.pause()
@@ -110,15 +110,19 @@ async def test_prompt_rejects_changed_task_identity(write_config, external_actio
 
 async def test_review_is_rechecked_before_commit(write_config):
     config = write_config()
-    mutate_board(config, lambda b: add_tasks(config.policy, b, ["one"]))
+    yaml_application(config).mutate(lambda b: add_tasks(config.policy, b, ["one"]))
     app = KanbanApp(config)
     async with app.run_test() as pilot:
         await pilot.press("e")
         screen = app.screen
         screen.query_one(Input).value = "draft"
-        mutate_board(config, lambda b: edit_task(config.policy, b, "1", "external one"))
+        yaml_application(config).mutate(
+            lambda b: edit_task(config.policy, b, "1", "external one")
+        )
         await pilot.press("enter", "ctrl+r")
-        mutate_board(config, lambda b: edit_task(config.policy, b, "1", "external two"))
+        yaml_application(config).mutate(
+            lambda b: edit_task(config.policy, b, "1", "external two")
+        )
         original = config.data_path.read_bytes()
         await pilot.press("enter")
         assert app.screen is screen
@@ -129,7 +133,9 @@ async def test_review_is_rechecked_before_commit(write_config):
 
 async def test_relative_reorder_uses_current_neighbor(write_config):
     config = write_config()
-    mutate_board(config, lambda b: add_tasks(config.policy, b, ["one", "two", "three"]))
+    yaml_application(config).mutate(
+        lambda b: add_tasks(config.policy, b, ["one", "two", "three"])
+    )
     app = KanbanApp(config)
     async with app.run_test() as pilot:
         await pilot.press("j")
@@ -139,7 +145,7 @@ async def test_relative_reorder_uses_current_neighbor(write_config):
             board.active[1].position, board.active[3].position = 3, 1
             return changed_result()
 
-        mutate_board(config, external)
+        yaml_application(config).mutate(external)
         await pilot.press("shift+up")
         await pilot.pause()
         assert [t.id for t in read_data(config).ordered_tasks(TaskState.TODO)] == [
@@ -151,12 +157,16 @@ async def test_relative_reorder_uses_current_neighbor(write_config):
 
 async def test_prompt_allows_unrelated_task_change(write_config):
     config = write_config()
-    mutate_board(config, lambda b: add_tasks(config.policy, b, ["one", "two"]))
+    yaml_application(config).mutate(
+        lambda b: add_tasks(config.policy, b, ["one", "two"])
+    )
     app = KanbanApp(config)
     async with app.run_test() as pilot:
         await pilot.press("e")
         app.screen.query_one(Input).value = "edited one"
-        mutate_board(config, lambda b: edit_task(config.policy, b, "2", "external two"))
+        yaml_application(config).mutate(
+            lambda b: edit_task(config.policy, b, "2", "external two")
+        )
         await pilot.press("enter")
         await pilot.pause()
         assert not isinstance(app.screen, PromptScreen)
@@ -168,7 +178,7 @@ async def test_prompt_allows_unrelated_task_change(write_config):
 
 async def test_unchanged_edit_prompt_closes_without_replacing_undo(write_config):
     config = write_config()
-    mutate_board(config, lambda b: add_tasks(config.policy, b, ["same"]))
+    yaml_application(config).mutate(lambda b: add_tasks(config.policy, b, ["same"]))
     original = config.data_path.read_bytes()
     app = KanbanApp(config)
 
@@ -182,13 +192,15 @@ async def test_unchanged_edit_prompt_closes_without_replacing_undo(write_config)
         assert "Task #1 is unchanged." in str(app.query_one("#status", Static).render())
 
     assert config.data_path.read_bytes() == original
-    assert not undo_board(config).active
+    assert not yaml_application(config).undo().active
 
 
 @pytest.mark.parametrize("key", ["p", "right", "d", "shift+up"])
 async def test_stale_shortcuts_reject_then_refresh(write_config, key):
     config = write_config()
-    mutate_board(config, lambda b: add_tasks(config.policy, b, ["one", "two", "three"]))
+    yaml_application(config).mutate(
+        lambda b: add_tasks(config.policy, b, ["one", "two", "three"])
+    )
     app = KanbanApp(config)
     async with app.run_test() as pilot:
         await pilot.press("j")
@@ -203,7 +215,7 @@ async def test_stale_shortcuts_reject_then_refresh(write_config, key):
                 return reorder_task(board, "2", "bottom")
             return edit_task(config.policy, board, "2", "external")
 
-        mutate_board(config, external)
+        yaml_application(config).mutate(external)
         original = config.data_path.read_bytes()
         await pilot.press(key)
         await pilot.pause()
@@ -214,8 +226,8 @@ async def test_stale_shortcuts_reject_then_refresh(write_config, key):
 
 async def test_archive_picker_rejects_replaced_entry(write_config):
     config = write_config()
-    mutate_board(config, lambda b: add_tasks(config.policy, b, ["one"]))
-    mutate_board(config, lambda b: delete_tasks(b, ["1"]))
+    yaml_application(config).mutate(lambda b: add_tasks(config.policy, b, ["one"]))
+    yaml_application(config).mutate(lambda b: delete_tasks(b, ["1"]))
     app = KanbanApp(config)
     async with app.run_test() as pilot:
         await pilot.press("r")
@@ -225,7 +237,7 @@ async def test_archive_picker_rejects_replaced_entry(write_config):
             board.deleted[1].text = "replaced archive"
             return changed_result()
 
-        mutate_board(config, external)
+        yaml_application(config).mutate(external)
         original = config.data_path.read_bytes()
         await pilot.press("enter")
         await pilot.pause()

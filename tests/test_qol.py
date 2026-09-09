@@ -5,8 +5,8 @@ from kanban_tui.cli import main
 from kanban_tui.models import TaskPriority, TaskState
 from kanban_tui.services import add_tasks, delete_tasks
 from kanban_tui.storage import read_data
-from kanban_tui.transactions import mutate_board
 from kanban_tui.tui import ArchiveScreen, KanbanApp
+from tests.application_test_support import yaml_application
 
 
 def test_add_metadata_is_one_atomic_undo(runner, write_config):
@@ -55,8 +55,8 @@ def test_add_option_like_text_after_separator(runner, write_config):
 
 async def test_refresh_keeps_selection_filter_and_undo(write_config):
     config = write_config()
-    mutate_board(
-        config, lambda board: add_tasks(config.policy, board, ["keep one", "keep two"])
+    yaml_application(config).mutate(
+        lambda board: add_tasks(config.policy, board, ["keep one", "keep two"])
     )
     app = KanbanApp(config, board_name="work")
     async with app.run_test() as pilot:
@@ -64,8 +64,8 @@ async def test_refresh_keeps_selection_filter_and_undo(write_config):
         await pilot.press("j")
         await pilot.pause()
         assert app._selected_task().id == 2
-        mutate_board(
-            config, lambda board: add_tasks(config.policy, board, ["keep external"])
+        yaml_application(config).mutate(
+            lambda board: add_tasks(config.policy, board, ["keep external"])
         )
         original = config.data_path.read_bytes()
         await pilot.press("ctrl+r")
@@ -79,7 +79,9 @@ async def test_refresh_keeps_selection_filter_and_undo(write_config):
 
 async def test_refresh_error_retains_last_valid_board(write_config):
     config = write_config()
-    mutate_board(config, lambda board: add_tasks(config.policy, board, ["keep"]))
+    yaml_application(config).mutate(
+        lambda board: add_tasks(config.policy, board, ["keep"])
+    )
     app = KanbanApp(config)
     async with app.run_test() as pilot:
         config.data_path.write_bytes(b"\xff")
@@ -92,10 +94,10 @@ async def test_refresh_error_retains_last_valid_board(write_config):
 
 async def test_archive_picker_search_restore_and_undo(write_config):
     config = write_config()
-    mutate_board(
-        config, lambda board: add_tasks(config.policy, board, ["alpha", "beta"])
+    yaml_application(config).mutate(
+        lambda board: add_tasks(config.policy, board, ["alpha", "beta"])
     )
-    mutate_board(config, lambda board: delete_tasks(board, ["1", "2"]))
+    yaml_application(config).mutate(lambda board: delete_tasks(board, ["1", "2"]))
     app = KanbanApp(config)
     async with app.run_test(size=(60, 18)) as pilot:
         await pilot.press("r")
@@ -117,8 +119,10 @@ async def test_archive_picker_search_restore_and_undo(write_config):
 
 async def test_archive_picker_rejection_and_cancel_do_not_write(write_config):
     config = write_config()
-    mutate_board(config, lambda board: add_tasks(config.policy, board, ["archived"]))
-    mutate_board(config, lambda board: delete_tasks(board, ["1"]))
+    yaml_application(config).mutate(
+        lambda board: add_tasks(config.policy, board, ["archived"])
+    )
+    yaml_application(config).mutate(lambda board: delete_tasks(board, ["1"]))
     config.limits.todo = 0
     original = config.data_path.read_bytes()
     app = KanbanApp(config)
@@ -148,8 +152,8 @@ async def test_archive_picker_empty_state(write_config):
 
 async def test_focus_falls_back_after_filter_and_archive(write_config):
     config = write_config()
-    mutate_board(
-        config, lambda board: add_tasks(config.policy, board, ["alpha", "beta"])
+    yaml_application(config).mutate(
+        lambda board: add_tasks(config.policy, board, ["alpha", "beta"])
     )
     app = KanbanApp(config, board_name="a-long-board-name-for-a-narrow-terminal")
     async with app.run_test(size=(60, 18)) as pilot:
@@ -174,8 +178,8 @@ async def test_refresh_does_not_create_datastore_or_require_writer_lock(write_co
     async with app.run_test() as pilot:
         await pilot.press("ctrl+r")
         assert not config.data_path.exists()
-        mutate_board(
-            config, lambda board: add_tasks(config.policy, board, ["external"])
+        yaml_application(config).mutate(
+            lambda board: add_tasks(config.policy, board, ["external"])
         )
         with datastore_lock(config):
             await pilot.press("ctrl+r")
