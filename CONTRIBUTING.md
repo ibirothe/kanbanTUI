@@ -66,7 +66,7 @@ relevant to your contribution.
 
 Read the [architecture](docs/architecture.md) before changing persistence or
 workflow semantics. CLI and TUI should share domain behavior through services.
-Preserve legacy valid data, side-effect-free reads, atomic writes and semantic
+Preserve valid data, side-effect-free reads, atomic writes and semantic
 no-op handling for undo.
 
 Tests isolate application state with `KANBAN_TUI_HOME` and temporary directories

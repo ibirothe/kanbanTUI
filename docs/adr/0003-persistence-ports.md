@@ -16,7 +16,7 @@ The shared transaction function imported concrete global YAML storage functions 
 
 `BoardApplication` owns read, mutation, import and undo use cases. Mutation keeps load, task-expectation checks, operation execution and commit inside one transaction. It commits only when a typed result reports a change and the board actually differs. Exceptions and conflicts leave persistence untouched; context exit releases the writer guarantee.
 
-`YamlBoardStore` is the production adapter. It maps the existing file lock, codec and atomic writer to the protocols and translates Click-based compatibility errors into application-level `StoreError`. CLI and TUI construct and inject one application object at their entry points. The old config-based functions in `transactions.py` remain deprecated compatibility wrappers through the `0.x` series, emit `DeprecationWarning` and will be removed in `1.0.0`; production adapters no longer call them.
+`YamlBoardStore` is the production adapter. It maps the file lock, codec and atomic writer to the protocols and translates adapter errors into application-level `StoreError`. CLI and TUI construct and inject one application object at their entry points.
 
 Pure merge/replace composition moved to `imports.py`. The JSON adapter decodes and encodes files; `BoardApplication.import_board()` validates policy, merges or replaces, reports remapped IDs and commits through the same transaction as other mutations.
 

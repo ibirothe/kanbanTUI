@@ -2,6 +2,11 @@
 
 A terminal-first personal Kanban board for developers. Arch Linux is the primary target environment; the application remains a normal Python CLI/TUI and does not require a daemon, database server, browser, or cloud account.
 
+kanbanTUI is a detached fork of [clikan](https://github.com/kitplummer/clikan)
+and evolves independently. Thank you to Kit Plummer and
+[all clikan contributors](https://github.com/kitplummer/clikan/graphs/contributors)
+for creating and improving the project that made this work possible.
+
 ## Quick start
 
 After [installation](#arch-linux-installation):
@@ -76,7 +81,7 @@ pipx uninstall kanbantui
 
 ## Configuration and customization
 
-- [Configuration and named boards](docs/configuration.md): paths, migration, settings and board selection.
+- [Configuration and named boards](docs/configuration.md): paths, settings and board selection.
 - [Color themes](docs/themes.md): built-in palettes and custom YAML themes.
 - [Shell completion](docs/shell-completion.md): Bash, Zsh and Fish setup.
 - [Local HTTP API](docs/local-api.md): authenticated local merge/replace imports.

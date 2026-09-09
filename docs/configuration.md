@@ -24,8 +24,6 @@ ${XDG_CONFIG_HOME:-~/.config}/kanban-tui/boards/work.yaml
 ${XDG_DATA_HOME:-~/.local/share}/kanban-tui/boards/work.dat
 ```
 
-Existing installations are not abandoned: when no XDG config exists, an existing `~/.kanban-tui.yaml` is still discovered. Existing named-board configs under `~/boards/` are also recognized. Fresh configs and named boards use the XDG layout.
-
 `KANBAN_TUI_HOME` remains available as an explicit portable/test override. When set, kanbanTUI keeps config, data, named boards, and custom themes below that directory instead of using XDG paths.
 
 Supported settings:
@@ -43,8 +41,7 @@ Configuration selection order is:
 1. `--config PATH` for an explicit YAML file;
 2. `--board NAME` for a named board;
 3. `KANBAN_TUI_HOME` when explicitly set;
-4. XDG config path;
-5. existing legacy `~/.kanban-tui.yaml` when no XDG config exists.
+4. XDG config path.
 
 `--config` and `--board` are mutually exclusive.
 

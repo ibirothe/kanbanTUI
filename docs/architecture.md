@@ -11,7 +11,7 @@ The runtime dependency set is deliberately small: Click, PyYAML, Rich, and Textu
 Production code lives under `src/kanban_tui/`:
 
 - `cli.py` — Click command surface, native completion, board/config selection and composition roots for terminal and local HTTP adapters.
-- `config.py` — XDG/portable/legacy path resolution, named boards, presentation-independent YAML validation and atomic config writes.
+- `config.py` — XDG/portable path resolution, named boards, presentation-independent YAML validation and atomic config writes.
 - `resources.py` — shared canonical config/datastore/lock paths and collision checks.
 - `models.py` — typed domain model and business invariants.
 - `policy.py` — presentation-independent TODO/WIP capacity and task-text policy with pure domain errors.
@@ -20,11 +20,10 @@ Production code lives under `src/kanban_tui/`:
 - `imports.py` — pure merge/replace import composition and deterministic ID remapping.
 - `application.py` — application-owned store/transaction protocols plus shared read, mutation, import and undo use cases.
 - `operation_messages.py` — English terminal presentation for operation results.
-- `settings.py` — compatible `AppConfig` composition of infrastructure, policy and presentation settings.
+- `settings.py` — `AppConfig` composition of infrastructure, policy and presentation settings.
 - `atomic.py` — shared same-directory temporary-file lifecycle and cleanup.
-- `transactions.py` — deprecated config-based compatibility wrappers scheduled for removal in `1.0.0`.
 - `storage.py` — YAML implementation of the application ports plus side-effect-free reads, cross-process writer locking, atomic writes and undo.
-- `codec.py` — strict YAML parsing, datastore schema versioning and legacy record migration.
+- `codec.py` — strict YAML parsing, datastore schema versioning and record validation.
 - `themes.py` — semantic built-in palettes plus XDG/portable custom-theme discovery and YAML validation.
 - `transfer_format.py` — transport-neutral versioned board payload encoding and validation.
 - `transfer.py` — JSON file I/O and Click error translation for board transfer.
@@ -45,7 +44,7 @@ Click's built-in shell completion protocol is used for Bash, Zsh and Fish. Choic
 For a mutation:
 
 1. The CLI or TUI resolves the selected configuration and constructs one `BoardApplication` with `YamlBoardStore` at its entry point.
-2. `config.py` validates it into the compatible `AppConfig` composition. `AppConfig.policy` maps only TODO/WIP and task-text limits into the immutable `BoardPolicy`; paths and presentation settings are not passed to services.
+2. `config.py` validates it into the `AppConfig` composition. `AppConfig.policy` maps only TODO/WIP and task-text limits into the immutable `BoardPolicy`; paths and presentation settings are not passed to services.
 3. `application.py` owns the mutation use case and opens the `BoardStore.transaction()` port. The YAML adapter acquires the datastore writer lock before exposing its transaction context.
 4. `BoardTransaction.load()` returns a detached validated `Board`. The YAML adapter decodes it through `codec.py`; a missing datastore is represented as an empty board without creating files or printing output.
    Snapshot-dependent TUI commands then compare their task expectations against this current board while still holding the writer lock. A conflict returns the current board through `TaskConflict` before the operation or any write occurs.
@@ -59,7 +58,7 @@ Each `OperationItem` carries a stable `OperationCode`, status, optional task ID 
 
 `TaskConflict` is a separate typed application exception carrying `TASK_CONFLICT` and the affected task ID. Infrastructure failures cross the persistence port as `StoreError` and are translated by terminal adapters. Adapters therefore never infer domain rejection, conflict or infrastructure failure from text or an `Error:` prefix. The result decision is recorded in [ADR 0002](adr/0002-typed-operation-results.md).
 
-The persistence contract and dependency direction are recorded in [ADR 0003](adr/0003-persistence-ports.md). `BoardStore` and `BoardTransaction` are deliberately small `typing.Protocol` ports owned by the application. `YamlBoardStore` implements them; the contract suite uses an in-memory implementation to verify substitution without filesystem access or monkeypatching concrete storage globals. Product code and regular tests use explicit `BoardApplication` injection. The compatibility functions in `transactions.py` emit `DeprecationWarning` and are scheduled for coordinated removal in `1.0.0`.
+The persistence contract and dependency direction are recorded in [ADR 0003](adr/0003-persistence-ports.md). `BoardStore` and `BoardTransaction` are deliberately small `typing.Protocol` ports owned by the application. `YamlBoardStore` implements them; the contract suite uses an in-memory implementation to verify substitution without filesystem access or monkeypatching concrete storage globals. Product code and regular tests use explicit `BoardApplication` injection.
 
 Read-only operations (`show`, `history`, export and normal TUI reads) do not acquire the exclusive writer lock.
 
@@ -118,9 +117,7 @@ TODO and IN PROGRESS use persistent numeric `position` ordering. Reordering norm
 
 DONE is ordered by `completed_at` descending, with descending task ID as the deterministic tie-breaker. Entering DONE sets the timestamp; leaving DONE clears it; re-entering DONE creates a new completion time. Later text, priority or tag edits update `modified_at` without changing completion order.
 
-Legacy DONE records without `completed_at` use their existing `modified_at` as the migration fallback and persist an explicit completion timestamp on their next write.
-
-Current timestamps retain their available ISO 8601 microsecond precision across datastore, JSON export/import, display JSON and undo snapshots. Historical timestamps that contain only seconds remain valid and are emitted without invented fractional values. Time-dependent service operations accept an optional clock callable for deterministic integration and testing.
+Current timestamps retain their available ISO 8601 microsecond precision across datastore, JSON export/import, display JSON and undo snapshots. Time-dependent service operations accept an optional clock callable for deterministic integration and testing.
 
 ## XDG configuration and board selection
 
@@ -150,9 +147,6 @@ Selection semantics are:
 2. `--board NAME` selects a named-board config.
 3. `KANBAN_TUI_HOME`, when set, switches to a portable single-root layout for config, data, named boards and custom themes.
 4. Otherwise the XDG config path is used.
-5. If no XDG config exists, an existing legacy `~/.kanban-tui.yaml` is discovered. Legacy named boards below `~/boards/` remain discoverable as well.
-
-This fallback is read-path compatibility rather than the layout for new installs: fresh `configure` and `board create` operations use XDG paths unless `KANBAN_TUI_HOME` or an explicit config path is selected.
 
 `--config` and `--board` are mutually exclusive. Named boards are lowercase slugs; `default` is reserved for the implicit default board.
 
@@ -181,13 +175,11 @@ Datastore writes use a temporary file in the datastore directory, flush and `fsy
 
 ## Datastore schema
 
-The datastore envelope uses integer `schema_version: 1`, plus `data`, `deleted` and an optional `_undo` snapshot. Undo snapshots use the same versioned board envelope without nested undo history. The current YAML task record is a compact list: state, text, modified time, creation time and manual position, followed by an optional sixth mapping carrying priority, tags and/or completion time.
+The datastore envelope uses integer `schema_version: 2`, plus `data`, `deleted` and optional `_undo` and `_import_receipts` entries. Undo snapshots use the same versioned board envelope without nested undo history. The YAML task record is a compact list: state, text, modified time, creation time and manual position, followed by an optional sixth mapping carrying priority, tags and/or completion time.
 
 `codec.py` owns this representation; the `Task` and `Board` domain models contain only domain state and invariants. The YAML loader rejects duplicate keys at every mapping level before dictionaries are constructed. Current envelopes, task metadata and records use explicit field allowlists. Unknown versions or fields are rejected rather than silently discarded.
 
-Unversioned legacy envelopes, schema version 1 and their known four-, five- and six-field records remain readable. Legacy timestamps are accepted and normalized to timezone-aware `datetime` values. Numeric positions and IDs are validated strictly; fractional values are not coerced. Reading legacy data has no write side effect; the next successful mutation writes schema version 2 while preserving all known fields.
-
-Schema version 2 may include a bounded `_import_receipts` list used by replay-safe HTTP imports. `IdempotentBoardTransaction` extends the base persistence port as an optional capability, so ordinary stores and mutations remain independent of HTTP retry behavior. The YAML adapter writes a changed board, undo snapshot and receipt in one atomic replacement under the existing writer lock. Ordinary mutations and undo preserve receipts. Clear-text client keys are never part of the datastore.
+The bounded `_import_receipts` list supports replay-safe HTTP imports. `IdempotentBoardTransaction` extends the base persistence port as an optional capability, so ordinary stores and mutations remain independent of HTTP retry behavior. The YAML adapter writes a changed board, undo snapshot and receipt in one atomic replacement under the existing writer lock. Ordinary mutations and undo preserve receipts. Clear-text client keys are never part of the datastore.
 
 ## Undo
 
