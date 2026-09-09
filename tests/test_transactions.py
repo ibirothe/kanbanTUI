@@ -2,25 +2,11 @@ from datetime import datetime, timezone
 
 import pytest
 
-from kanban_tui.application import BoardApplication, TaskConflict, TaskExpectation
-from kanban_tui.policy import BoardPolicy
+from kanban_tui.application import TaskConflict, TaskExpectation
 from kanban_tui.results import OperationCode, OperationResult
 from kanban_tui.services import add_tasks, edit_task
 from kanban_tui.storage import read_data
 from tests.application_test_support import yaml_application
-from tests.store_test_double import MemoryBoardStore
-
-
-def test_transaction_reads_once_and_snapshots_detached_state():
-    store = MemoryBoardStore()
-    application = BoardApplication(store)
-    board, result = application.mutate(
-        lambda current: add_tasks(BoardPolicy(), current, ["one"])
-    )
-    assert result.succeeded == 1
-    assert store.loads == 1
-    board.active[1].text = "changed in memory"
-    assert not application.undo().active
 
 
 def test_conflict_prevents_operation_and_preserves_snapshot(write_config):

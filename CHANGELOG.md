@@ -1,10 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 - 2026-09-09
 
 ### Fixes and quality
 
-- define the canonical Python integration surface and deprecate legacy wrappers, no-op parameters and cross-module re-exports for coordinated removal in 1.0.0;
+- define the canonical Python integration surface and mark superseded wrappers, no-op parameters and cross-module re-exports for coordinated removal in 1.0.0;
 - make local HTTP imports optionally replay-safe with bounded hashed receipts committed atomically in YAML datastore schema 2;
 - identify the selected board when serving the local API and correlate sanitized server failures with secret-free local logs;
 - make local import API outcomes unambiguous and return bounded actionable details for transfer-format and policy failures;
@@ -35,6 +35,8 @@
 
 ### Documentation and maintenance
 
+- identify kanbanTUI as a detached fork of clikan and thank its contributors;
+- remove three redundant tests after reviewing the suite's behavioral coverage;
 - record persistence ports, transaction guarantees and dependency injection in ADR 0003;
 - record the typed operation-result and adapter-presentation contract in ADR 0002;
 - record the domain, policy, configuration and adapter dependency direction in ADR 0001;
@@ -42,7 +44,7 @@
 - add a quick start, documentation index, contribution guide and maintenance checklist;
 - add a shared local quality-check command;
 - fix Fish completion setup when `XDG_CONFIG_HOME` is unset or empty;
-- ignore regular datastore lock files as well as legacy lock directories.
+- ignore regular datastore lock files as well as obsolete lock directories.
 
 ## 0.5.0
 
@@ -53,7 +55,7 @@ Current maintained kanbanTUI baseline.
 - moved production code into `src/kanban_tui/` with separated CLI, configuration, models, services, storage, rendering, transfer, and TUI modules;
 - moved tests into `tests/` with isolated temporary board state;
 - centralized project/tool configuration in `pyproject.toml`;
-- added typed task/config/board domain models while retaining backward-compatible valid YAML reads;
+- added typed task/config/board domain models while preserving valid existing YAML reads;
 - added atomic datastore/config replacement.
 
 ### UX
@@ -79,7 +81,7 @@ Current maintained kanbanTUI baseline.
 - task IDs remain unique across active and archived history;
 - TODO/WIP invariants are enforced on all relevant transitions;
 - timestamps are timezone-aware ISO 8601 on new writes;
-- optional metadata is stored in a backward-compatible sixth task-record field;
+- optional metadata is stored in a sixth task-record field;
 - complete JSON transfers preserve metadata and completion time;
 - added complete versioned JSON board export/import with merge and replace modes;
 - added one-level atomic undo for successful semantic mutations;
@@ -89,7 +91,7 @@ Current maintained kanbanTUI baseline.
 
 - made datastore reads side-effect free: missing boards remain absent until a mutation actually succeeds;
 - added explicit `completed_at` semantics so DONE ordering reflects completion time rather than later text or metadata edits;
-- retained backward compatibility by deriving `completed_at` from `modified_at` for legacy DONE records;
+- derive a missing `completed_at` from `modified_at` for DONE records;
 - changed merge import to deterministically remap imported IDs that collide with existing active or archived history;
 - made already-satisfied reorder requests and imports with no effective changes true semantic no-ops;
 - semantic no-ops no longer update timestamps, write the datastore, or consume the single undo snapshot.
@@ -112,14 +114,13 @@ Current maintained kanbanTUI baseline.
 - made Arch Linux the primary documented developer/desktop target;
 - changed end-user installation guidance to Arch's `python-pipx` package plus direct Git installation, avoiding system-site `pip install` usage;
 - adopted XDG config/data defaults: `~/.config/kanban-tui/` and `~/.local/share/kanban-tui/`, honoring `XDG_CONFIG_HOME` and `XDG_DATA_HOME`;
-- retained safe discovery of existing `~/.kanban-tui.yaml` and legacy `~/boards/` configurations when no XDG config exists;
 - retained `KANBAN_TUI_HOME` as an explicit portable/test root override;
 - store custom theme YAML files below the same XDG/portable config root under `themes/`;
 - added Bash, Zsh and Fish completion documentation using Click's native completion protocol;
 - added dynamic completion for existing `--board` names and discovered theme names;
 - removed the `click-default-group` runtime dependency and implemented no-argument board display directly with `click.Group`;
 - added Python 3.14 project metadata for the current Arch Python generation;
-- added regression coverage for XDG paths, legacy discovery, native shell completion and no-argument root behavior.
+- added regression coverage for XDG paths, path discovery, native shell completion and no-argument root behavior.
 
 ### Maintainer
 

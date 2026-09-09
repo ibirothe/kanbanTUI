@@ -33,8 +33,7 @@ Within the existing exclusive writer transaction it either:
 The YAML datastore schema advances to version 2 and may contain a top-level
 `_import_receipts` list. Each receipt contains only the two SHA-256 digests, mode,
 aggregate outcome and deterministic ID mapping needed to reproduce the original
-successful API response. Schema 1 and unversioned documents remain readable. The
-next successful write upgrades them to schema 2.
+successful API response.
 
 Only successful keyed imports are retained. The list keeps the latest 128 receipts
 in insertion order; adding another evicts the oldest. Replays do not refresh that
@@ -60,6 +59,4 @@ its key is new again.
 - The successful replay body is identical to the original successful response.
 - Recording a keyed semantic no-op writes a receipt but preserves the current undo
   snapshot.
-- Older kanbanTUI versions reject a schema-2 datastore instead of silently dropping
-  receipt state.
 - The guarantee is intentionally bounded rather than a permanent request history.
